@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { pool } from "../db/index.js";
 import { cosineSimilarity } from "../utils/math.js"; // criaremos esse helper rapidinho
+import { v4 as uuid } from "uuid";
 
 dotenv.config();
 const router = express.Router();
@@ -90,6 +91,18 @@ router.post("/respond", async (req, res) => {
     // 4️⃣ Gera uma resposta em linguagem natural
     const answer = await generateResponse(query, context);
 
+    // 🗂️ 5. Registra o log da conversa no banco
+    try {
+      await pool.query(
+        `INSERT INTO conversation_logs (id, user_id, query, answer, memories_used)
+        VALUES ($1, $2, $3, $4, $5)`,
+        [uuid(), user_id, query, answer, JSON.stringify(scored)]
+      );
+    } catch (err) {
+    console.error("❌ Erro ao registrar log da conversa:", err);
+    }
+
+    // ✅ Envia resposta final
     res.json({ query, answer, top_results: scored });
   } catch (err) {
     console.error("❌ Respond error:", err);
