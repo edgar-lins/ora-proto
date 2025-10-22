@@ -45,6 +45,10 @@ router.post('/event', async (req, res) => {
 
     // Gera o vetor semântico
     const embedding = await generateEmbedding(content);
+    if (!embedding || !Array.isArray(embedding)) {
+  throw new Error("Failed to generate valid embedding for content");
+}
+
 
     // Salva no banco
     await pool.query(

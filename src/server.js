@@ -1,6 +1,7 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import deviceRoutes from './routes/device.js';
+import searchRoutes from "./routes/search.js";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -15,6 +16,7 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.use('/api/v1/device', deviceRoutes);
+app.use("/api/v1/device", searchRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
