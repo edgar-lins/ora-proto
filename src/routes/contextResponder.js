@@ -25,12 +25,13 @@ async function generateEmbedding(text) {
   });
 
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || "Failed to generate embedding");
+  if (!res.ok)
+    throw new Error(data.error?.message || "Failed to generate embedding");
   return data.data[0].embedding;
 }
 
 /**
- * Similaridade de cosseno
+ * Calcula similaridade de cosseno entre dois vetores
  */
 function cosineSimilarity(a, b) {
   const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
@@ -115,21 +116,46 @@ Responda de forma clara e concisa, como se lembrasse do fato.`;
       max_tokens: 150,
     });
 
+    // 6️⃣ Extrai a resposta final
     const answer = completion.choices?.[0]?.message?.content?.trim();
 
-    // 6️⃣ Retorna a resposta final
+    // 7️⃣ Envia a resposta imediatamente ao cliente
     res.json({
       status: "ok",
       query,
       answer,
       context_used: contextBlock,
     });
+
+    // 8️⃣ Após responder, registra memória automática em background
+    (async () => {
+      try {
+        const memoryPayload = {
+          user_id,
+          query,
+          answer,
+          context_used: contextBlock,
+        };
+
+        await fetch("http://localhost:3000/api/v1/memory/auto", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(memoryPayload),
+        });
+
+        console.log("💾 Memória automática registrada com sucesso!");
+      } catch (autoErr) {
+        console.error("⚠️ Erro ao registrar memória automática:", autoErr);
+      }
+    })();
   } catch (err) {
     console.error("❌ Error generating contextual response:", err);
-    res.status(500).json({
-      error: "Context response failed",
-      details: err.message,
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Context response failed",
+        details: err.message,
+      });
+    }
   }
 });
 
