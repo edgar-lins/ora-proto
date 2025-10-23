@@ -10,7 +10,7 @@ const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
- * Gera o vetor semântico (embedding)
+ * 🧠 Gera o vetor semântico (embedding)
  */
 async function generateEmbedding(text) {
   const res = await fetch("https://api.openai.com/v1/embeddings", {
@@ -36,7 +36,7 @@ async function generateEmbedding(text) {
 }
 
 /**
- * Filtra memórias muito curtas ou triviais
+ * ⚙️ Filtra memórias muito curtas ou triviais
  */
 function isTrivial(text) {
   if (!text) return true;
@@ -48,65 +48,76 @@ function isTrivial(text) {
 }
 
 /**
- * Gera resumo curto e tags automáticas via modelo
+ * ✨ Gera resumo e tags automáticos para uma nova memória
  */
 async function enrichMemory(text) {
   try {
-    const response = await openai.chat.completions.create({
+    const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content:
-            "Você é um assistente que gera resumos e tags para anotações pessoais curtas.",
+          content: `Você é um assistente que gera:
+- Um resumo curto (até 12 palavras)
+- Até 3 tags no formato #Palavra ou #DuasPalavras, separadas por vírgula.
+
+Responda **sempre** neste formato:
+Resumo: <texto>
+Tags: #tag1, #tag2, #tag3`,
         },
         {
           role: "user",
-          content: `Texto: "${text}". Gere um resumo em até 12 palavras e 3 tags relevantes.`,
+          content: `Texto: "${text}"`,
         },
       ],
       temperature: 0.3,
-      max_tokens: 100,
     });
 
-    const output = response.choices?.[0]?.message?.content?.trim() || "";
-    const [summaryRaw, tagsRaw] = output.split(/Tags?:/i);
-    const summary = summaryRaw?.trim();
-    const tags = tagsRaw
-      ? tagsRaw
-          .split(/[,;\n]/)
+    const output = completion.choices[0].message.content || "";
+    
+    // Garante extração mesmo se vier sem "Tags:"
+    const summaryMatch = output.match(/Resumo:\s*(.*)/i);
+    const tagsMatch = output.match(/Tags?:\s*(.*)/i);
+
+    const summary = summaryMatch ? summaryMatch[1].trim() : text.slice(0, 100);
+    const tags = tagsMatch
+      ? tagsMatch[1]
+          .split(/[,#]/)
           .map((t) => t.trim())
           .filter((t) => t.length > 0)
+          .map((t) => (t.startsWith("#") ? t : `#${t}`))
       : [];
 
     return { summary, tags };
   } catch (err) {
-    console.error("⚠️ Erro ao gerar resumo/tags:", err);
+    console.error("⚠️ Erro ao enriquecer memória manual:", err);
     return { summary: text.slice(0, 60), tags: [] };
   }
 }
 
+
 /**
- * Endpoint principal de eventos (criação de memórias)
+ * 📥 POST /api/v1/device/event
+ * Cria uma nova memória manual
  */
 router.post("/event", async (req, res) => {
   try {
-    const { user_id, text, metadata } = req.body;
+    const { user_id, content, metadata } = req.body;
 
-    if (!user_id || !text) {
-      return res.status(400).json({ error: "Missing user_id or text" });
+    if (!user_id || !content) {
+      return res.status(400).json({ error: "Missing user_id or content" });
     }
 
     // 🧩 Filtro de trivialidade
-    if (isTrivial(text)) {
+    if (isTrivial(content)) {
       return res.status(400).json({ error: "Memory too short or trivial" });
     }
 
-    // 🧠 Enriquecimento semântico
-    const { summary, tags } = await enrichMemory(text);
+    // 🧠 Enriquecimento semântico (resumo + tags)
+    const { summary, tags } = await enrichMemory(content);
 
     // 🔢 Geração do vetor semântico
-    const embedding = await generateEmbedding(text);
+    const embedding = await generateEmbedding(content);
     if (!embedding || !Array.isArray(embedding)) {
       throw new Error("Failed to generate valid embedding for content");
     }
@@ -114,9 +125,11 @@ router.post("/event", async (req, res) => {
     // 💾 Salvamento no banco
     const id = uuid();
     await pool.query(
-      `INSERT INTO memories (id, user_id, content, embedding, summary, tags, metadata, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-      [id, user_id, text, JSON.stringify(embedding), summary, tags,  JSON.stringify(metadata) || "{}"]
+      `
+      INSERT INTO memories (id, user_id, content, summary, tags, metadata, embedding, type, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual', NOW())
+      `,
+      [id, user_id, content, summary, tags, metadata || {}, JSON.stringify(embedding)]
     );
 
     res.json({
@@ -134,7 +147,7 @@ router.post("/event", async (req, res) => {
 });
 
 /**
- * 🧠 POST /api/v1/device/memories/reprocess
+ * 🔁 POST /api/v1/device/memories/reprocess
  * Reanalisa memórias antigas e gera resumo + tags
  * Se "dry_run" = true, apenas simula sem salvar
  */
@@ -157,7 +170,10 @@ router.post("/memories/reprocess", async (req, res) => {
     );
 
     if (memories.length === 0) {
-      return res.json({ status: "ok", message: "Nenhuma memória pendente de reprocessamento." });
+      return res.json({
+        status: "ok",
+        message: "Nenhuma memória pendente de reprocessamento.",
+      });
     }
 
     const updated = [];
@@ -185,9 +201,11 @@ router.post("/memories/reprocess", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Erro ao reprocessar memórias:", err);
-    res.status(500).json({ error: "Failed to reprocess memories", details: err.message });
+    res.status(500).json({
+      error: "Failed to reprocess memories",
+      details: err.message,
+    });
   }
 });
-
 
 export default router;
