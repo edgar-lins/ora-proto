@@ -1,103 +1,123 @@
 # 🧠 ORA — Personal AI Memory Engine
 
-> “An assistant that *remembers what matters.*”  
->  
-> ORA é um **motor de memória semântica** construído em **Node.js + OpenAI + PostgreSQL**, capaz de **registrar, buscar e responder** com base em lembranças pessoais — o primeiro passo para um assistente verdadeiramente contextual.
+> "An assistant that *remembers what matters.*"
 
----
+ORA é um **motor de memória semântica** que permite criar um assistente pessoal com memória contextual persistente. Construído com tecnologias modernas, ele é capaz de armazenar, recuperar e responder baseado em lembranças pessoais de forma natural e contextualizada.
 
-![Node](https://img.shields.io/badge/node-%3E%3D18.0-green)
-![Express](https://img.shields.io/badge/express-4.x-blue)
-![PostgreSQL](https://img.shields.io/badge/postgres-14.x-336791)
+## ⚡ Stack Tecnológico
+
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
+![Express](https://img.shields.io/badge/Express-5.1-blue)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-8.16-336791)
 ![OpenAI](https://img.shields.io/badge/OpenAI-API-orange)
-![Status](https://img.shields.io/badge/status-em%20desenvolvimento-yellow)
+![Status](https://img.shields.io/badge/Status-Em%20Desenvolvimento-yellow)
 
----
+## 🎯 Principais Recursos
 
-## 🚀 Funcionalidades
+- 🧠 **Memória Semântica**
+  - Armazena memórias usando embeddings vetoriais
+  - Busca por significado contextual, não apenas palavras-chave
+  - Persistência eficiente em PostgreSQL
 
-✅ Armazena “memórias” com embeddings semânticos  
-✅ Busca por **significado**, não por palavra exata  
-✅ Gera **respostas em linguagem natural** baseadas nas memórias  
-✅ Persistência em PostgreSQL (com suporte a vetores)  
-✅ Arquitetura modular e pronta para escalar (Supabase, Prisma, etc.)
+- 🤖 **IA Contextual**
+  - Integração com OpenAI para processamento de linguagem natural
+  - Respostas personalizadas baseadas no histórico
+  - Compreensão contextual das interações
 
----
+- 🔄 **Arquitetura Escalável**
+  - API RESTful com Express
+  - Suporte a vetores no PostgreSQL
+  - Estrutura modular pronta para expansão
 
-## 🧩 Arquitetura
+## 🛠️ Instalação
 
-ora-proto/
-│
-├── src/
-│ ├── routes/ # Endpoints REST (event, search, respond)
-│ ├── db/ # Conexão e schema
-│ ├── utils/ # Funções auxiliares (cosineSimilarity, format)
-│ ├── services/ # Lógica de embeddings e GPT
-│ └── config/ # Env, constantes, etc.
-│
-├── client/ # (futuro) Painel React / Chat UI
-├── prisma/ # (futuro) ORM Prisma
-│
-├── docker-compose.yml # PostgreSQL local
-├── package.json
-└── README.md
+### Pré-requisitos
 
----
+- Node.js 18 ou superior
+- Docker e Docker Compose
+- Chave de API da OpenAI
 
-## ⚙️ Instalação
+### Configuração
 
-### 1️⃣ Clonar o projeto
-```bash
-git clone https://github.com/<seu-usuario>/ora.git
-cd ora
-```
+1. **Clone o repositório**
+   ```bash
+   git clone https://github.com/edgar-lins/ora-proto.git
+   cd ora-proto
+   ```
 
-### 2️⃣ Configurar ambiente
-Crie o arquivo .env:
-DATABASE_URL=postgresql://ora:ora123@localhost:5432/ora
-OPENAI_API_KEY=sk-...
-PORT=3000
+2. **Configure as variáveis de ambiente**
+   ```bash
+   # Crie um arquivo .env com:
+   DATABASE_URL=postgresql://ora:ora123@localhost:5432/ora
+   OPENAI_API_KEY=sua_chave_aqui
+   PORT=3000
+   ```
 
-### 3️⃣ Subir o banco (Docker)
-```bash
-docker-compose up -d
-```
+3. **Inicie o banco de dados**
+   ```bash
+   docker-compose up -d
+   ```
 
-### 4️⃣ Rodar a API
-```bash
-npm install
-npm run dev
-```
+4. **Instale as dependências e inicie a API**
+   ```bash
+   npm install
+   npm run dev
+   ```
 
----
+## � API Endpoints
 
-## 🔌 Endpoints
-
-### 🧠 Criar memória
+### Criar Memória
+```http
 POST /api/v1/device/event
+Content-Type: application/json
 
-```json
 {
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "text": "Conversei com o João sobre o projeto da semana que vem."
+    "user_id": "00000000-0000-0000-0000-000000000001",
+    "text": "Conversei com o João sobre o projeto da semana que vem."
 }
 ```
 
----
-
-### 🔍 Busca semântica
+### Buscar Memórias
+```http
 POST /api/v1/device/search
+Content-Type: application/json
 
-```json
 {
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "query": "O que combinei com o João?"
+    "user_id": "00000000-0000-0000-0000-000000000001",
+    "query": "O que combinei com o João?"
 }
 ```
 
----
+### Obter Resposta Contextual
+```http
+POST /api/v1/device/respond
+Content-Type: application/json
 
-### 💬 Resposta contextual
+{
+    "user_id": "00000000-0000-0000-0000-000000000001",
+    "query": "Lembre-me dos detalhes da conversa com o João"
+}
+```
+
+## 🔧 Estrutura do Projeto
+
+```
+ora-proto/
+├── src/
+│   ├── routes/      # Rotas da API
+│   ├── db/          # Configuração do banco
+│   └── utils/       # Utilitários
+├── docker-compose.yml
+└── package.json
+```
+
+## � Licença
+
+Este projeto está sob a licença ISC. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+## 👥 Contribuição
+
+Contribuições são bem-vindas! Sinta-se à vontade para abrir issues e pull requests.
 POST /api/v1/device/respond
 
 ```json
