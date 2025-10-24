@@ -13,6 +13,7 @@ import voiceRoutes from "./routes/voice.js";
 import speakRoutes from "./routes/speak.js";
 import speakRespondRoutes from "./routes/speakRespond.js";
 import speakConverse from "./routes/speakConverse.js";
+import conversationContext from "./routes/conversationContext.js";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -39,6 +40,7 @@ app.use("/api/v1/device", voiceRoutes);
 app.use("/api/v1/device", speakRoutes);
 app.use("/api/v1/device", speakRespondRoutes);
 app.use("/api/v1/device", speakConverse);
+app.use("/api/v1", conversationContext);
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);

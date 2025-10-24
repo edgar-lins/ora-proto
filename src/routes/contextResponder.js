@@ -8,6 +8,9 @@ dotenv.config();
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// 🔒 Limiar mínimo de confiança para usar contexto
+const SIMILARITY_MIN = 0.35;
+
 /**
  * Gera embedding da query
  */
@@ -25,13 +28,12 @@ async function generateEmbedding(text) {
   });
 
   const data = await res.json();
-  if (!res.ok)
-    throw new Error(data.error?.message || "Failed to generate embedding");
+  if (!res.ok) throw new Error(data.error?.message || "Failed to generate embedding");
   return data.data[0].embedding;
 }
 
 /**
- * Calcula similaridade de cosseno entre dois vetores
+ * Similaridade de cosseno
  */
 function cosineSimilarity(a, b) {
   const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
@@ -42,12 +44,11 @@ function cosineSimilarity(a, b) {
 
 /**
  * POST /api/v1/device/context/respond
- * Usa o contexto de memória pra responder perguntas de forma natural
+ * Usa o contexto + histórico de conversa pra responder de forma natural e segura
  */
 router.post("/context/respond", async (req, res) => {
   try {
     const { user_id, query, limit = 5 } = req.body;
-
     if (!user_id || !query) {
       return res.status(400).json({ error: "Missing user_id or query" });
     }
@@ -55,107 +56,119 @@ router.post("/context/respond", async (req, res) => {
     // 1️⃣ Gera embedding da query
     const queryEmbedding = await generateEmbedding(query);
 
-    // 2️⃣ Busca memórias do usuário
+    // 2️⃣ Busca memórias semânticas do usuário
     const { rows: memories } = await pool.query(
-      `SELECT id, content, summary, embedding
+      `SELECT id, content, summary, embedding, created_at
        FROM memories
        WHERE user_id = $1`,
       [user_id]
     );
 
-    // 3️⃣ Calcula similaridades
     const scored = memories
       .filter((m) => m.embedding)
       .map((m) => {
-        let embeddingVector;
+        let emb;
         try {
-          embeddingVector = Array.isArray(m.embedding)
-            ? m.embedding
-            : JSON.parse(m.embedding);
+          emb = Array.isArray(m.embedding) ? m.embedding : JSON.parse(m.embedding);
         } catch {
           return null;
         }
+        if (!Array.isArray(emb)) return null;
 
-        if (!Array.isArray(embeddingVector)) return null;
-
-        const similarity = cosineSimilarity(queryEmbedding, embeddingVector);
+        const similarity = cosineSimilarity(queryEmbedding, emb);
         return { id: m.id, summary: m.summary, content: m.content, similarity };
       })
       .filter(Boolean)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
 
-    if (scored.length === 0) {
+    const topSim = scored[0]?.similarity ?? 0;
+
+    // 🔒 Evita respostas “chutadas” se o contexto for fraco
+    if (topSim < SIMILARITY_MIN) {
       return res.json({
         status: "ok",
-        message: "Nenhuma memória relevante encontrada para responder.",
+        query,
+        answer:
+          "Não encontrei detalhes confiáveis nas minhas memórias para afirmar isso. Pode me lembrar rapidinho do que se trata?",
+        context_used: "",
+        conversation_used: [],
       });
     }
 
-    // 4️⃣ Monta o bloco de contexto
     const contextBlock = scored
-      .map((m, idx) => `(${idx + 1}) ${m.summary || m.content}`)
+      .map((m, i) => `(${i + 1}) ${m.summary || m.content}`)
       .join("\n");
 
-    // 5️⃣ Gera resposta com GPT
-    const prompt = `
-Você é o ORA, um assistente pessoal que responde com base nas memórias do usuário.
-Use apenas as informações do contexto abaixo para responder de forma direta e natural.
+    // 3️⃣ Busca histórico recente
+    const { rows: recentHistory } = await pool.query(
+      `SELECT role, content
+       FROM conversation_history
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [user_id]
+    );
 
-Contexto:
+    const conversationHistory = recentHistory.reverse().map((r) => ({
+      role: r.role,
+      content: r.content,
+    }));
+
+    // 4️⃣ Monta prompt com guardrails anti-alucinação
+    const systemPrompt = {
+      role: "system",
+      content: `
+Você é o ORA — um assistente pessoal empático e natural.
+Regras de ouro:
+- Use apenas fatos presentes no "Contexto de memória".
+- NÃO invente datas, nomes, horários ou números. Se o dado não estiver no contexto, diga "não consta nas minhas memórias".
+- Prefira repetir o formato do contexto (ex: "sexta-feira"), sem criar novas datas.
+- Seja claro e direto; evite termos como "caro usuário" ou "big day".
+- Responda em 1–2 frases, de forma humana e leve.
+
+Contexto de memória:
 ${contextBlock}
+`.trim(),
+    };
 
-Pergunta do usuário: ${query}
+    const messages = [
+      systemPrompt,
+      ...conversationHistory,
+      { role: "user", content: query },
+    ];
 
-Responda de forma clara e concisa, como se lembrasse do fato.`;
-
+    // 5️⃣ Gera resposta com GPT
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 150,
+      messages,
+      temperature: 0.5,
+      max_tokens: 180,
     });
 
-    // 6️⃣ Extrai a resposta final
     const answer = completion.choices?.[0]?.message?.content?.trim();
 
-    // 7️⃣ Envia a resposta imediatamente ao cliente
+    // 6️⃣ Salva no histórico
+    await pool.query(
+      `INSERT INTO conversation_history (id, user_id, role, content, created_at)
+       VALUES (gen_random_uuid(), $1, 'user', $2, NOW()),
+              (gen_random_uuid(), $1, 'assistant', $3, NOW())`,
+      [user_id, query, answer]
+    );
+
     res.json({
       status: "ok",
       query,
       answer,
       context_used: contextBlock,
+      conversation_used: conversationHistory,
     });
-
-    // 8️⃣ Após responder, registra memória automática em background
-    (async () => {
-      try {
-        const memoryPayload = {
-          user_id,
-          query,
-          answer,
-          context_used: contextBlock,
-        };
-
-        await fetch("http://localhost:3000/api/v1/memory/auto", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(memoryPayload),
-        });
-
-        console.log("💾 Memória automática registrada com sucesso!");
-      } catch (autoErr) {
-        console.error("⚠️ Erro ao registrar memória automática:", autoErr);
-      }
-    })();
   } catch (err) {
-    console.error("❌ Error generating contextual response:", err);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "Context response failed",
-        details: err.message,
-      });
-    }
+    console.error("❌ Context respond (guardrails) error:", err);
+    res.status(500).json({
+      error: "Context response with conversation failed",
+      details: err.message,
+    });
   }
 });
 
