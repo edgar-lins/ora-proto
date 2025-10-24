@@ -25,13 +25,12 @@ async function generateEmbedding(text) {
   });
 
   const data = await res.json();
-  if (!res.ok)
-    throw new Error(data.error?.message || "Failed to generate embedding");
+  if (!res.ok) throw new Error(data.error?.message || "Failed to generate embedding");
   return data.data[0].embedding;
 }
 
 /**
- * Calcula similaridade de cosseno entre dois vetores
+ * Similaridade de cosseno
  */
 function cosineSimilarity(a, b) {
   const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
@@ -42,12 +41,11 @@ function cosineSimilarity(a, b) {
 
 /**
  * POST /api/v1/device/context/respond
- * Usa o contexto de memória pra responder perguntas de forma natural
+ * Usa o contexto + histórico de conversa pra responder de forma natural
  */
 router.post("/context/respond", async (req, res) => {
   try {
     const { user_id, query, limit = 5 } = req.body;
-
     if (!user_id || !query) {
       return res.status(400).json({ error: "Missing user_id or query" });
     }
@@ -55,7 +53,7 @@ router.post("/context/respond", async (req, res) => {
     // 1️⃣ Gera embedding da query
     const queryEmbedding = await generateEmbedding(query);
 
-    // 2️⃣ Busca memórias do usuário
+    // 2️⃣ Busca memórias semânticas do usuário
     const { rows: memories } = await pool.query(
       `SELECT id, content, summary, embedding
        FROM memories
@@ -63,99 +61,93 @@ router.post("/context/respond", async (req, res) => {
       [user_id]
     );
 
-    // 3️⃣ Calcula similaridades
     const scored = memories
       .filter((m) => m.embedding)
       .map((m) => {
-        let embeddingVector;
+        let emb;
         try {
-          embeddingVector = Array.isArray(m.embedding)
-            ? m.embedding
-            : JSON.parse(m.embedding);
+          emb = Array.isArray(m.embedding) ? m.embedding : JSON.parse(m.embedding);
         } catch {
           return null;
         }
+        if (!Array.isArray(emb)) return null;
 
-        if (!Array.isArray(embeddingVector)) return null;
-
-        const similarity = cosineSimilarity(queryEmbedding, embeddingVector);
+        const similarity = cosineSimilarity(queryEmbedding, emb);
         return { id: m.id, summary: m.summary, content: m.content, similarity };
       })
       .filter(Boolean)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
 
-    if (scored.length === 0) {
-      return res.json({
-        status: "ok",
-        message: "Nenhuma memória relevante encontrada para responder.",
-      });
-    }
-
-    // 4️⃣ Monta o bloco de contexto
     const contextBlock = scored
-      .map((m, idx) => `(${idx + 1}) ${m.summary || m.content}`)
+      .map((m, i) => `(${i + 1}) ${m.summary || m.content}`)
       .join("\n");
 
+    // 3️⃣ Busca histórico de conversa recente
+    const { rows: recentHistory } = await pool.query(
+      `SELECT role, content
+       FROM conversation_history
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [user_id]
+    );
+
+    const conversationHistory = recentHistory.reverse().map((r) => ({
+      role: r.role,
+      content: r.content,
+    }));
+
+    // 4️⃣ Monta prompt com personalidade
+    const systemPrompt = {
+      role: "system",
+      content: `
+Você é o ORA — um assistente pessoal inteligente e empático.
+Fale de forma natural, direta e amigável, como uma pessoa real.
+Use o contexto e o histórico de conversa pra manter coerência.
+
+Personalidade: Calmo, prestativo, com leve toque de humor.
+Evite respostas genéricas ou mecânicas.
+`,
+    };
+
+    const messages = [
+      systemPrompt,
+      { role: "system", content: `Contexto de memória:\n${contextBlock}` },
+      ...conversationHistory,
+      { role: "user", content: query },
+    ];
+
     // 5️⃣ Gera resposta com GPT
-    const prompt = `
-Você é o ORA, um assistente pessoal que responde com base nas memórias do usuário.
-Use apenas as informações do contexto abaixo para responder de forma direta e natural.
-
-Contexto:
-${contextBlock}
-
-Pergunta do usuário: ${query}
-
-Responda de forma clara e concisa, como se lembrasse do fato.`;
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 150,
+      messages,
+      temperature: 0.8, // mais criativo
+      max_tokens: 200,
     });
 
-    // 6️⃣ Extrai a resposta final
     const answer = completion.choices?.[0]?.message?.content?.trim();
 
-    // 7️⃣ Envia a resposta imediatamente ao cliente
+    // 6️⃣ Salva no histórico de conversa (usuário + IA)
+    await pool.query(
+      `INSERT INTO conversation_history (id, user_id, role, content, created_at)
+       VALUES (gen_random_uuid(), $1, 'user', $2, NOW()), (gen_random_uuid(), $1, 'assistant', $3, NOW())`,
+      [user_id, query, answer]
+    );
+
     res.json({
       status: "ok",
       query,
       answer,
       context_used: contextBlock,
+      conversation_used: conversationHistory,
     });
-
-    // 8️⃣ Após responder, registra memória automática em background
-    (async () => {
-      try {
-        const memoryPayload = {
-          user_id,
-          query,
-          answer,
-          context_used: contextBlock,
-        };
-
-        await fetch("http://localhost:3000/api/v1/memory/auto", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(memoryPayload),
-        });
-
-        console.log("💾 Memória automática registrada com sucesso!");
-      } catch (autoErr) {
-        console.error("⚠️ Erro ao registrar memória automática:", autoErr);
-      }
-    })();
   } catch (err) {
-    console.error("❌ Error generating contextual response:", err);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "Context response failed",
-        details: err.message,
-      });
-    }
+    console.error("❌ Context respond (conversation) error:", err);
+    res.status(500).json({
+      error: "Context response with conversation failed",
+      details: err.message,
+    });
   }
 });
 
