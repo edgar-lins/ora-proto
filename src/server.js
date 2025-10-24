@@ -10,6 +10,7 @@ import contextBuilderRoutes from "./routes/contextBuilder.js";
 import contextResponderRoutes from "./routes/contextResponder.js";
 import memoryAutoRoutes from "./routes/memoryAuto.js";
 import voiceRoutes from "./routes/voice.js";
+import speakRoutes from "./routes/speak.js";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -33,6 +34,7 @@ app.use("/api/v1/device", contextBuilderRoutes);
 app.use("/api/v1/device", contextResponderRoutes);
 app.use("/api/v1/memory", memoryAutoRoutes);
 app.use("/api/v1/device", voiceRoutes);
+app.use("/api/v1/device", speakRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
