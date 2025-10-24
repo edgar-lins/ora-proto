@@ -4,6 +4,8 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import OpenAI from "openai";
+import { pool } from "../db/index.js";
+import { v4 as uuidv4 } from "uuid";
 
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -46,6 +48,21 @@ router.post("/speak/respond", async (req, res) => {
 
     const buffer = Buffer.from(await mp3.arrayBuffer());
     await fs.promises.writeFile(tmpPath, buffer);
+
+    const id = uuidv4();
+    await pool.query(
+    `
+    INSERT INTO memories (id, user_id, content, summary, type, metadata, voice_used, created_at)
+    VALUES ($1, $2, $3, $4, 'auto', $5, $6, NOW())
+    `,
+    [
+        id,
+        user_id,
+        `Pergunta: ${query}\nResposta falada: ${answerText}`,
+        answerText.slice(0, 100),
+        JSON.stringify({ source: "speak_respond" }),
+        voice,
+    ]);
 
     // 3️⃣ define headers e envia áudio + JSON
     res.setHeader("Content-Type", "audio/mpeg");
