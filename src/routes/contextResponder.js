@@ -8,6 +8,9 @@ dotenv.config();
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// 🔒 Limiar mínimo de confiança para usar contexto
+const SIMILARITY_MIN = 0.35;
+
 /**
  * Gera embedding da query
  */
@@ -41,7 +44,7 @@ function cosineSimilarity(a, b) {
 
 /**
  * POST /api/v1/device/context/respond
- * Usa o contexto + histórico de conversa pra responder de forma natural
+ * Usa o contexto + histórico de conversa pra responder de forma natural e segura
  */
 router.post("/context/respond", async (req, res) => {
   try {
@@ -55,7 +58,7 @@ router.post("/context/respond", async (req, res) => {
 
     // 2️⃣ Busca memórias semânticas do usuário
     const { rows: memories } = await pool.query(
-      `SELECT id, content, summary, embedding
+      `SELECT id, content, summary, embedding, created_at
        FROM memories
        WHERE user_id = $1`,
       [user_id]
@@ -79,11 +82,25 @@ router.post("/context/respond", async (req, res) => {
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
 
+    const topSim = scored[0]?.similarity ?? 0;
+
+    // 🔒 Evita respostas “chutadas” se o contexto for fraco
+    if (topSim < SIMILARITY_MIN) {
+      return res.json({
+        status: "ok",
+        query,
+        answer:
+          "Não encontrei detalhes confiáveis nas minhas memórias para afirmar isso. Pode me lembrar rapidinho do que se trata?",
+        context_used: "",
+        conversation_used: [],
+      });
+    }
+
     const contextBlock = scored
       .map((m, i) => `(${i + 1}) ${m.summary || m.content}`)
       .join("\n");
 
-    // 3️⃣ Busca histórico de conversa recente
+    // 3️⃣ Busca histórico recente
     const { rows: recentHistory } = await pool.query(
       `SELECT role, content
        FROM conversation_history
@@ -98,22 +115,25 @@ router.post("/context/respond", async (req, res) => {
       content: r.content,
     }));
 
-    // 4️⃣ Monta prompt com personalidade
+    // 4️⃣ Monta prompt com guardrails anti-alucinação
     const systemPrompt = {
       role: "system",
       content: `
-Você é o ORA — um assistente pessoal inteligente e empático.
-Fale de forma natural, direta e amigável, como uma pessoa real.
-Use o contexto e o histórico de conversa pra manter coerência.
+Você é o ORA — um assistente pessoal empático e natural.
+Regras de ouro:
+- Use apenas fatos presentes no "Contexto de memória".
+- NÃO invente datas, nomes, horários ou números. Se o dado não estiver no contexto, diga "não consta nas minhas memórias".
+- Prefira repetir o formato do contexto (ex: "sexta-feira"), sem criar novas datas.
+- Seja claro e direto; evite termos como "caro usuário" ou "big day".
+- Responda em 1–2 frases, de forma humana e leve.
 
-Personalidade: Calmo, prestativo, com leve toque de humor.
-Evite respostas genéricas ou mecânicas.
-`,
+Contexto de memória:
+${contextBlock}
+`.trim(),
     };
 
     const messages = [
       systemPrompt,
-      { role: "system", content: `Contexto de memória:\n${contextBlock}` },
       ...conversationHistory,
       { role: "user", content: query },
     ];
@@ -122,16 +142,17 @@ Evite respostas genéricas ou mecânicas.
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
-      temperature: 0.8, // mais criativo
-      max_tokens: 200,
+      temperature: 0.5,
+      max_tokens: 180,
     });
 
     const answer = completion.choices?.[0]?.message?.content?.trim();
 
-    // 6️⃣ Salva no histórico de conversa (usuário + IA)
+    // 6️⃣ Salva no histórico
     await pool.query(
       `INSERT INTO conversation_history (id, user_id, role, content, created_at)
-       VALUES (gen_random_uuid(), $1, 'user', $2, NOW()), (gen_random_uuid(), $1, 'assistant', $3, NOW())`,
+       VALUES (gen_random_uuid(), $1, 'user', $2, NOW()),
+              (gen_random_uuid(), $1, 'assistant', $3, NOW())`,
       [user_id, query, answer]
     );
 
@@ -143,7 +164,7 @@ Evite respostas genéricas ou mecânicas.
       conversation_used: conversationHistory,
     });
   } catch (err) {
-    console.error("❌ Context respond (conversation) error:", err);
+    console.error("❌ Context respond (guardrails) error:", err);
     res.status(500).json({
       error: "Context response with conversation failed",
       details: err.message,
