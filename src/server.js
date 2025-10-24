@@ -16,10 +16,12 @@ import speakConverse from "./routes/speakConverse.js";
 import conversationContext from "./routes/conversationContext.js";
 import voiceLoopRoutes from "./routes/voiceLoop.js";
 import dotenv from 'dotenv';
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
 
 app.get('/', (req, res) => {
@@ -31,7 +33,7 @@ const PORT = process.env.PORT || 3000;
 app.use('/api/v1/device', deviceRoutes);
 app.use("/api/v1/device", searchRoutes);
 app.use("/api/v1/device", respondRoutes);
-app.use("/api/v1/device", memoriesRoutes);
+app.use("/api/v1", memoriesRoutes);
 app.use("/api/v1/device", contextRoutes);
 app.use("/api/v1/device", contextRetrieverRoutes);
 app.use("/api/v1/device", contextBuilderRoutes);
