@@ -3,13 +3,12 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import OpenAI from "openai";
+import { openai } from "../utils/openaiClient.js";
 import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = express.Router();
 const upload = multer({ dest: os.tmpdir() });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * 🎙️ POST /api/v1/device/speak/converse
@@ -29,28 +28,29 @@ router.post("/speak/converse", upload.single("audio"), async (req, res) => {
     const fixedPath = path.join(os.tmpdir(), `${req.file.filename}.mp3`);
 
     try {
-    // Adiciona extensão .mp3 para o Whisper reconhecer o MIME type
-    await fs.promises.copyFile(originalPath, fixedPath);
+      // Adiciona extensão .mp3 para o Whisper reconhecer o MIME type
+      await fs.promises.copyFile(originalPath, fixedPath);
 
-    const transcription = await openai.audio.transcriptions.create({
+      const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(fixedPath),
         model: "whisper-1",
         language: "pt",
-    });
+      });
 
-    var transcript = transcription.text.trim();
-    console.log(`🎧 ORA ouviu: "${transcript}"`);
+      var transcript = transcription.text.trim();
+      console.log(`🎧 ORA ouviu: "${transcript}"`);
 
-    // Limpa arquivos temporários
-    await fs.promises.unlink(fixedPath).catch(() => {});
-    await fs.promises.unlink(originalPath).catch(() => {});
+      // Limpa arquivos temporários
+      await fs.promises.unlink(fixedPath).catch(() => {});
+      await fs.promises.unlink(originalPath).catch(() => {});
     } catch (err) {
-    console.error("⚠️ Erro ao transcrever áudio:", err);
-    throw new Error("Falha na transcrição de áudio: " + err.message);
+      console.error("⚠️ Erro ao transcrever áudio:", err);
+      throw new Error("Falha na transcrição de áudio: " + err.message);
     }
 
     // 2️⃣ Gera resposta contextual usando o endpoint existente
-    const contextResp = await fetch("http://localhost:3000/api/v1/device/context/respond", {
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const contextResp = await fetch(`${baseUrl}/api/v1/device/context/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id, query: transcript }),

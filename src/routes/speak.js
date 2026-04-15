@@ -2,10 +2,9 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import OpenAI from "openai";
+import { openai } from "../utils/openaiClient.js";
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * POST /api/v1/device/speak

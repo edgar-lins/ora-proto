@@ -1,41 +1,8 @@
 import express from "express";
-import fetch from "node-fetch";
 import { pool } from "../db/index.js";
-import dotenv from "dotenv";
-dotenv.config();
+import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
 
 const router = express.Router();
-
-/**
- * Gera embedding para consulta
- */
-async function generateEmbedding(text) {
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: text,
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || "Embedding generation failed");
-  return data.data[0].embedding;
-}
-
-/**
- * Similaridade de cosseno
- */
-function cosineSimilarity(a, b) {
-  const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
-  const magA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
-  const magB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
-  return dot / (magA * magB);
-}
 
 /**
  * 🧩 POST /api/v1/device/context/build
@@ -94,9 +61,6 @@ router.post("/context/build", async (req, res) => {
     const contextBlock = scored
       .map((m, idx) => `(${idx + 1}) ${m.summary || m.content}`)
       .join("\n");
-
-    // 5️⃣ (Opcional) salva em memória temporária futuramente — placeholder
-    // Aqui poderemos adicionar cache/sessão no futuro
 
     res.json({
       status: "ok",

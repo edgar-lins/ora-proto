@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, Trash2, RefreshCcw } from "lucide-react";
+import { API_BASE, DEFAULT_USER_ID } from "../api.js";
 
 export default function Memories() {
   const [memories, setMemories] = useState([]);
@@ -7,13 +8,13 @@ export default function Memories() {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
 
-  const user_id = "00000000-0000-0000-0000-000000000001";
+  const user_id = DEFAULT_USER_ID;
 
   // 🔹 Busca inicial
   async function fetchMemories() {
     try {
       setLoading(true);
-      const res = await fetch(`http://localhost:3000/api/v1/device/memories/list/${user_id}`);
+      const res = await fetch(`${API_BASE}/api/v1/device/memories/list/${user_id}`);
       const data = await res.json();
       setMemories(data.memories || []);
     } catch (err) {
@@ -27,7 +28,7 @@ export default function Memories() {
   async function searchMemories() {
     try {
       setSearching(true);
-      const res = await fetch("http://localhost:3000/api/v1/device/memories/search", {
+      const res = await fetch(`${API_BASE}/api/v1/device/memories/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id, query }),
@@ -45,7 +46,7 @@ export default function Memories() {
   async function deleteMemory(id) {
     if (!confirm("Tem certeza que deseja excluir esta memória?")) return;
     try {
-      await fetch(`http://localhost:3000/api/v1/device/memories/${id}`, { method: "DELETE" });
+      await fetch(`${API_BASE}/api/v1/device/memories/${id}`, { method: "DELETE" });
       setMemories((m) => m.filter((mem) => mem.id !== id));
     } catch (err) {
       console.error("Erro ao excluir memória:", err);

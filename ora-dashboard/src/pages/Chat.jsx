@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_BASE, DEFAULT_USER_ID } from "../api.js";
 
 export default function Chat() {
   const [messages, setMessages] = useState([
@@ -17,11 +18,11 @@ export default function Chat() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:3000/api/v1/device/context/respond", {
+      const res = await fetch(`${API_BASE}/api/v1/device/context/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: "00000000-0000-0000-0000-000000000001",
+          user_id: DEFAULT_USER_ID,
           query: input,
         }),
       });

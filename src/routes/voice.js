@@ -4,10 +4,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import fetch from "node-fetch";
-import OpenAI from "openai";
+import { openai } from "../utils/openaiClient.js";
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Upload em memória (até ~25MB)
 const upload = multer({
@@ -43,7 +42,6 @@ router.post("/voice", upload.single("audio"), async (req, res) => {
       const resp = await openai.audio.transcriptions.create({
         file: fs.createReadStream(tmpPath),
         model: modelPrimary,
-        // alguns modelos aceitam "language", não é obrigatório
         ...(language ? { language } : {}),
       });
       transcriptText = resp.text || resp?.data?.text || null;
@@ -62,7 +60,8 @@ router.post("/voice", upload.single("audio"), async (req, res) => {
     }
 
     // 2) Persiste como memória manual, reaproveitando o pipeline existente (/device/event)
-    const storeResp = await fetch("http://localhost:3000/api/v1/device/event", {
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const storeResp = await fetch(`${baseUrl}/api/v1/device/event`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

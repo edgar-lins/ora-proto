@@ -1,21 +1,10 @@
 import express from "express";
 import { pool } from "../db/index.js";
-import OpenAI from "openai";
 import { v4 as uuidv4 } from "uuid";
+import { openai } from "../utils/openaiClient.js";
+import { generateEmbedding } from "../utils/math.js";
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-/**
- * Função utilitária para gerar embedding (vetor semântico)
- */
-async function generateEmbedding(text) {
-  const response = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text,
-  });
-  return response.data[0].embedding;
-}
 
 /**
  * Função utilitária para enriquecer o texto com resumo e tags

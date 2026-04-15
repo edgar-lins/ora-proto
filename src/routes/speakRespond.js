@@ -3,12 +3,11 @@ import fetch from "node-fetch";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import OpenAI from "openai";
+import { openai } from "../utils/openaiClient.js";
 import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * POST /api/v1/device/speak/respond
@@ -22,7 +21,8 @@ router.post("/speak/respond", async (req, res) => {
     }
 
     // 1️⃣ chama o pipeline de contexto existente
-    const contextResp = await fetch("http://localhost:3000/api/v1/device/context/respond", {
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const contextResp = await fetch(`${baseUrl}/api/v1/device/context/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id, query }),
@@ -51,27 +51,26 @@ router.post("/speak/respond", async (req, res) => {
 
     const id = uuidv4();
     await pool.query(
-    `
-    INSERT INTO memories (id, user_id, content, summary, type, metadata, voice_used, created_at)
-    VALUES ($1, $2, $3, $4, 'auto', $5, $6, NOW())
-    `,
-    [
+      `
+      INSERT INTO memories (id, user_id, content, summary, type, metadata, voice_used, created_at)
+      VALUES ($1, $2, $3, $4, 'auto', $5, $6, NOW())
+      `,
+      [
         id,
         user_id,
         `Pergunta: ${query}\nResposta falada: ${answerText}`,
         answerText.slice(0, 100),
         JSON.stringify({ source: "speak_respond" }),
         voice,
-    ]);
+      ]
+    );
 
-    // 3️⃣ define headers e envia áudio + JSON
+    // 3️⃣ define headers e envia áudio
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader(
       "Content-Disposition",
       `inline; filename="ora-speak-${Date.now()}.mp3"`
     );
-
-    // 🧠 adiciona metadados no header pra debug (opcional)
     res.setHeader("X-ORA-Answer", encodeURIComponent(answerText));
 
     // 4️⃣ envia o áudio em stream
@@ -82,7 +81,6 @@ router.post("/speak/respond", async (req, res) => {
       fs.promises.unlink(tmpPath).catch(() => {});
     });
 
-    // também loga no console pra debug
     console.log(`🎤 ORA respondeu e falou: "${answerText}"`);
   } catch (err) {
     console.error("❌ speak/respond error:", err);

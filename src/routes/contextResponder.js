@@ -1,46 +1,12 @@
 import express from "express";
-import fetch from "node-fetch";
-import OpenAI from "openai";
 import { pool } from "../db/index.js";
-import dotenv from "dotenv";
+import { openai } from "../utils/openaiClient.js";
+import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
 
-dotenv.config();
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // 🔒 Limiar mínimo de confiança para usar contexto
 const SIMILARITY_MIN = 0.35;
-
-/**
- * Gera embedding da query
- */
-async function generateEmbedding(text) {
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: text,
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || "Failed to generate embedding");
-  return data.data[0].embedding;
-}
-
-/**
- * Similaridade de cosseno
- */
-function cosineSimilarity(a, b) {
-  const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
-  const magA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
-  const magB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
-  return dot / (magA * magB);
-}
 
 /**
  * POST /api/v1/device/context/respond
@@ -84,7 +50,7 @@ router.post("/context/respond", async (req, res) => {
 
     const topSim = scored[0]?.similarity ?? 0;
 
-    // 🔒 Evita respostas “chutadas” se o contexto for fraco
+    // 🔒 Evita respostas "chutadas" se o contexto for fraco
     if (topSim < SIMILARITY_MIN) {
       return res.json({
         status: "ok",

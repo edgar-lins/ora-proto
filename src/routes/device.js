@@ -1,39 +1,10 @@
 import express from "express";
 import { pool } from "../db/index.js";
 import { v4 as uuid } from "uuid";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-import OpenAI from "openai";
+import { openai } from "../utils/openaiClient.js";
+import { generateEmbedding } from "../utils/math.js";
 
-dotenv.config();
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-/**
- * 🧠 Gera o vetor semântico (embedding)
- */
-async function generateEmbedding(text) {
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: text,
-    }),
-  });
-
-  const data = await res.json();
-
-  if (!res.ok) {
-    console.error("Embedding API error:", data);
-    throw new Error(data.error?.message || "Failed to generate embedding");
-  }
-
-  return data.data[0].embedding;
-}
 
 /**
  * ⚙️ Filtra memórias muito curtas ou triviais
@@ -74,7 +45,7 @@ Tags: #tag1, #tag2, #tag3`,
     });
 
     const output = completion.choices[0].message.content || "";
-    
+
     // Garante extração mesmo se vier sem "Tags:"
     const summaryMatch = output.match(/Resumo:\s*(.*)/i);
     const tagsMatch = output.match(/Tags?:\s*(.*)/i);

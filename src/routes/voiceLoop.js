@@ -4,12 +4,11 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import fetch from "node-fetch";
-import OpenAI from "openai";
+import { openai } from "../utils/openaiClient.js";
 import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const storage = multer.diskStorage({
   destination: os.tmpdir(),
   filename: (req, file, cb) => {
@@ -19,7 +18,6 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-
 
 /**
  * POST /api/v1/voice/loop
@@ -49,7 +47,8 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     }
 
     // 2️⃣ Gera resposta contextual usando o pipeline existente
-    const contextResp = await fetch("http://localhost:3000/api/v1/device/context/respond", {
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const contextResp = await fetch(`${baseUrl}/api/v1/device/context/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id, query: transcript }),
