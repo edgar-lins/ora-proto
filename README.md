@@ -1,57 +1,78 @@
 # ORA — Personal AI Memory Engine
 
-> "An assistant that remembers what matters."
+> Semantic memory engine for personal AI — stores, retrieves and responds based on meaning using vector embeddings, GPT-4o-mini and full voice I/O.
 
-ORA é um motor de memória semântica pessoal. Ele armazena o que você vive, aprende e decide — e usa isso para responder com contexto real, não com achismos. Construído em Node.js com embeddings vetoriais e GPT-4o-mini, com suporte completo a voz.
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)
+![Express](https://img.shields.io/badge/Express-5.1-blue)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)
+![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-orange)
+![React](https://img.shields.io/badge/React-19-61DAFB)
+![Status](https://img.shields.io/badge/status-in%20development-yellow)
 
 ---
 
-## Stack
+## What is ORA?
 
-| Camada | Tecnologia |
+ORA is a personal memory engine that gives AI assistants real, persistent context. Instead of forgetting everything between sessions, ORA stores what you tell it — as semantic vector embeddings — and retrieves the most relevant memories to answer your questions accurately.
+
+No hallucinations. If there's no confident context, ORA says so instead of making something up.
+
+**Key capabilities:**
+- Store personal memories with automatic enrichment (summary + tags via GPT)
+- Semantic search by meaning, not keywords
+- Contextual responses grounded in your actual memories
+- Anti-hallucination guardrails (similarity threshold)
+- Full voice I/O — speak in, get a spoken response back
+- Persistent conversation history per user
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
 |---|---|
 | Runtime | Node.js 18+ (ES Modules) |
 | Framework | Express 5.1 |
-| Banco de dados | PostgreSQL 16 (Docker) |
-| Embeddings | `text-embedding-3-small` (OpenAI) |
-| IA conversacional | `gpt-4o-mini` |
-| Transcrição | `gpt-4o-mini-transcribe` / `whisper-1` (fallback) |
+| Database | PostgreSQL 16 (Docker) |
+| Embeddings | `text-embedding-3-small` |
+| Chat | `gpt-4o-mini` |
+| Transcription | `gpt-4o-mini-transcribe` / `whisper-1` (fallback) |
 | TTS | `gpt-4o-mini-tts` |
 | Frontend | React 19 + Vite + Tailwind CSS |
 
 ---
 
-## Instalação
+## Getting Started
 
-### Pré-requisitos
+### Prerequisites
 
 - Node.js 18+
-- Docker e Docker Compose
-- Chave de API da OpenAI
+- Docker & Docker Compose
+- OpenAI API key
 
-### Setup
+### Installation
 
 ```bash
-# 1. Clone o repositório
+# Clone the repository
 git clone https://github.com/edgar-lins/ora-proto.git
 cd ora-proto
 
-# 2. Configure as variáveis de ambiente
+# Set up environment variables
 cp .env.example .env
-# Edite .env e preencha sua OPENAI_API_KEY
+# Edit .env and add your OPENAI_API_KEY
 
-# 3. Suba o banco de dados
+# Start the database
 docker compose up -d
 
-# 4. Instale as dependências e inicialize o schema
+# Install dependencies and initialize the schema
 npm install
 node src/db/init.js
 
-# 5. Inicie o servidor
+# Start the server
 npm run dev
 ```
 
-### Frontend (Dashboard)
+### Dashboard (Frontend)
 
 ```bash
 cd ora-dashboard
@@ -59,62 +80,58 @@ npm install
 npm run dev
 ```
 
-O dashboard estará disponível em `http://localhost:5173`.
+Dashboard available at `http://localhost:5173`.
 
 ---
 
-## Variáveis de Ambiente
+## Environment Variables
 
-Consulte `.env.example` para a lista completa. As essenciais:
+See `.env.example` for the full list. Required variables:
 
-| Variável | Descrição | Padrão |
-|---|---|---|
-| `DATABASE_URL` | String de conexão PostgreSQL | — |
-| `OPENAI_API_KEY` | Chave da API OpenAI | — |
-| `PORT` | Porta do servidor | `3000` |
-| `BASE_URL` | URL base do servidor (para chamadas internas entre rotas) | `http://localhost:3000` |
-| `TRANSCRIBE_MODEL` | Modelo de transcrição de áudio | `gpt-4o-mini-transcribe` |
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `PORT` | Server port (default: `3000`) |
+| `BASE_URL` | Public base URL of this server — used for internal route-to-route calls (default: `http://localhost:3000`) |
+| `TRANSCRIBE_MODEL` | Audio transcription model (default: `gpt-4o-mini-transcribe`) |
 
 ---
 
-## Estrutura do Projeto
+## Project Structure
 
 ```
 ora-proto/
 ├── src/
-│   ├── server.js                  # Entry point — monta rotas e middleware
+│   ├── server.js                   # Entry point
 │   ├── db/
-│   │   ├── index.js               # Pool de conexão PostgreSQL
-│   │   └── init.js                # Inicialização do schema (rodar uma vez)
+│   │   ├── index.js                # PostgreSQL connection pool
+│   │   └── init.js                 # Schema initialization (run once)
 │   ├── utils/
-│   │   ├── openaiClient.js        # Singleton do cliente OpenAI
-│   │   └── math.js                # cosineSimilarity + generateEmbedding
+│   │   ├── openaiClient.js         # Shared OpenAI client singleton
+│   │   └── math.js                 # cosineSimilarity + generateEmbedding
 │   └── routes/
-│       ├── device.js              # Criar memória manual + reprocessar
-│       ├── memories.js            # Listar, buscar e deletar memórias
-│       ├── memoryAuto.js          # Salvar memória automática de Q&A
-│       ├── search.js              # Busca semântica (legado)
-│       ├── respond.js             # Resposta contextual (legado)
-│       ├── contextBuilder.js      # Montar bloco de contexto
-│       ├── contextRetriever.js    # Recuperar top-K memórias relevantes
-│       ├── contextResponder.js    # Resposta com guardrails anti-alucinação
-│       ├── context.js             # Reset de contexto (placeholder)
-│       ├── conversationContext.js # Salvar e recuperar histórico de conversa
-│       ├── voice.js               # Upload de áudio → transcrição → memória
-│       ├── speak.js               # Texto → áudio MP3 (TTS)
-│       ├── speakRespond.js        # Query → resposta contextual → áudio
-│       ├── speakConverse.js       # Áudio in → transcrição → resposta → áudio out
-│       └── voiceLoop.js           # Loop completo de voz com memória automática
+│       ├── device.js               # Create memory + reprocess
+│       ├── memories.js             # List, search, delete memories
+│       ├── memoryAuto.js           # Auto-save Q&A as memory
+│       ├── contextResponder.js     # Contextual response with guardrails ⭐
+│       ├── contextRetriever.js     # Retrieve top-K relevant memories
+│       ├── contextBuilder.js       # Build context block from memories
+│       ├── conversationContext.js  # Save and retrieve conversation history
+│       ├── voice.js                # Audio upload → transcription → memory
+│       ├── speak.js                # Text → MP3 audio (TTS)
+│       ├── speakRespond.js         # Query → contextual response → audio
+│       ├── speakConverse.js        # Audio in → transcription → response → audio out
+│       └── voiceLoop.js            # Full voice loop with auto memory
 │
-├── ora-dashboard/                 # Frontend React
+├── ora-dashboard/                  # React frontend
 │   └── src/
-│       ├── api.js                 # Constantes centralizadas (API_BASE, USER_ID)
-│       ├── App.jsx
-│       ├── layouts/
-│       │   └── DashboardLayout.jsx
-│       └── pages/
-│           ├── Chat.jsx           # Interface de chat
-│           └── Memories.jsx       # Listagem e busca de memórias
+│       ├── api.js                  # Centralized API_BASE and USER_ID constants
+│       ├── pages/
+│       │   ├── Chat.jsx            # Chat interface
+│       │   └── Memories.jsx        # Memory list and semantic search
+│       └── layouts/
+│           └── DashboardLayout.jsx
 │
 ├── docker-compose.yml
 ├── .env.example
@@ -127,319 +144,112 @@ ora-proto/
 
 Base URL: `http://localhost:3000`
 
-Todos os endpoints aceitam e retornam JSON, exceto os de áudio que retornam `audio/mpeg`.
+All endpoints accept and return JSON, except audio endpoints which return `audio/mpeg`.
+
+### Memories
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/device/event` | Create a manual memory |
+| `GET` | `/api/v1/device/memories/list/:user_id` | List 50 most recent memories |
+| `POST` | `/api/v1/device/memories/search` | Semantic search |
+| `DELETE` | `/api/v1/device/memories/:id` | Delete a memory |
+| `POST` | `/api/v1/device/memories/reprocess` | Re-enrich memories with missing summary/tags |
+| `POST` | `/api/v1/memory/auto` | Auto-save a Q&A pair as memory |
+
+### Context & Responses
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/device/context/respond` | Contextual response with guardrails ⭐ |
+| `POST` | `/api/v1/device/context/retrieve` | Retrieve top-K relevant memories |
+| `POST` | `/api/v1/device/context/build` | Build formatted context block |
+| `POST` | `/api/v1/conversation/save` | Save a conversation turn |
+| `GET` | `/api/v1/conversation/context/:user_id` | Get last 5 conversation turns |
+
+### Voice & Audio
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/device/voice` | Upload audio → transcribe → save as memory |
+| `POST` | `/api/v1/device/speak` | Text → MP3 audio (TTS) |
+| `POST` | `/api/v1/device/speak/respond` | Query → contextual response → audio |
+| `POST` | `/api/v1/device/speak/converse` | Audio in → transcribe → respond → audio out |
+| `POST` | `/api/v1/voice/loop` | Full voice loop with automatic memory |
 
 ---
 
-### Memórias
-
-#### Criar memória manual
+### Example: Create a memory
 
 ```http
 POST /api/v1/device/event
-```
+Content-Type: application/json
 
-```json
 {
   "user_id": "00000000-0000-0000-0000-000000000001",
-  "content": "Conversei com o João sobre o projeto na sexta.",
-  "metadata": {}
+  "content": "Had a call with João about the project deadline — he needs the report by Friday."
 }
 ```
 
-Resposta:
 ```json
 {
   "status": "ok",
-  "memory_id": "uuid",
-  "summary": "Conversa com João sobre projeto",
-  "tags": ["#Projeto", "#João"]
+  "memory_id": "b3f1...",
+  "summary": "Call with João about project deadline",
+  "tags": ["#João", "#Deadline", "#Project"]
 }
 ```
 
-> Memórias triviais (menos de 5 palavras, "ok", "sim", etc.) são rejeitadas automaticamente.
-> O enriquecimento (resumo + tags) é gerado automaticamente via GPT.
-
----
-
-#### Listar memórias
-
-```http
-GET /api/v1/device/memories/list/:user_id
-```
-
-Retorna até 50 memórias mais recentes.
-
----
-
-#### Busca semântica
-
-```http
-POST /api/v1/device/memories/search
-```
-
-```json
-{
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "query": "O que combinei com o João?"
-}
-```
-
-Retorna até 10 memórias ordenadas por similaridade semântica.
-
----
-
-#### Deletar memória
-
-```http
-DELETE /api/v1/device/memories/:id
-```
-
----
-
-#### Reprocessar memórias antigas
-
-```http
-POST /api/v1/device/memories/reprocess
-```
-
-```json
-{
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "limit": 10,
-  "dry_run": false
-}
-```
-
-Gera resumo e tags para memórias que ainda não foram enriquecidas.
-Com `dry_run: true`, apenas simula sem salvar.
-
----
-
-#### Salvar memória automática de Q&A
-
-```http
-POST /api/v1/memory/auto
-```
-
-```json
-{
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "query": "O que era o projeto?",
-  "answer": "Era o sistema de relatórios do cliente X.",
-  "context_used": true
-}
-```
-
----
-
-### Contexto e Respostas
-
-#### Resposta contextual com guardrails ⭐
+### Example: Ask a question
 
 ```http
 POST /api/v1/device/context/respond
-```
+Content-Type: application/json
 
-```json
 {
   "user_id": "00000000-0000-0000-0000-000000000001",
-  "query": "O que combinei com o João?"
+  "query": "When does João need the report?"
 }
 ```
 
-Resposta:
 ```json
 {
   "status": "ok",
-  "query": "O que combinei com o João?",
-  "answer": "Você combinou de revisar o projeto na sexta-feira.",
-  "context_used": "(1) Conversa com João sobre projeto\n(2) ...",
-  "conversation_used": [...]
+  "answer": "João needs the report by Friday.",
+  "context_used": "(1) Call with João about project deadline",
+  "conversation_used": []
 }
 ```
 
-Este é o endpoint principal de chat. Possui:
-- Busca semântica nas memórias do usuário
-- Histórico dos últimos 5 turnos de conversa
-- Guardrail anti-alucinação: se a similaridade máxima for menor que 0.35, responde que não encontrou contexto confiável em vez de inventar
+If no confident memory exists, ORA responds honestly:
+> *"I couldn't find reliable details in my memories about that. Could you remind me?"*
 
 ---
 
-#### Recuperar memórias relevantes
-
-```http
-POST /api/v1/device/context/retrieve
-```
-
-```json
-{
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "query": "reunião com clientes",
-  "limit": 5
-}
-```
-
----
-
-#### Montar bloco de contexto
-
-```http
-POST /api/v1/device/context/build
-```
-
-Mesmo payload do retrieve. Retorna as memórias já formatadas como bloco de texto.
-
----
-
-### Histórico de Conversa
-
-#### Salvar turno
-
-```http
-POST /api/v1/conversation/save
-```
-
-```json
-{
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "role": "user",
-  "content": "Qual era o prazo?"
-}
-```
-
-O histórico mantém apenas os últimos 5 turnos por usuário.
-
----
-
-#### Recuperar histórico
-
-```http
-GET /api/v1/conversation/context/:user_id
-```
-
----
-
-### Voz e Áudio
-
-#### Transcrever áudio e salvar como memória
-
-```http
-POST /api/v1/device/voice
-Content-Type: multipart/form-data
-```
-
-| Campo | Tipo | Descrição |
-|---|---|---|
-| `audio` | File | Arquivo de áudio (.mp3, .m4a, .wav...) |
-| `user_id` | String | ID do usuário |
-| `language` | String | (opcional) Código de idioma, ex: `pt` |
-
-Tamanho máximo: 25MB. Usa `gpt-4o-mini-transcribe` com fallback para `whisper-1`.
-
----
-
-#### Texto para fala
-
-```http
-POST /api/v1/device/speak
-```
-
-```json
-{
-  "text": "Você combinou de revisar o projeto na sexta.",
-  "voice": "alloy"
-}
-```
-
-Retorna: `audio/mpeg`
-
----
-
-#### Query → resposta contextual → áudio
-
-```http
-POST /api/v1/device/speak/respond
-```
-
-```json
-{
-  "user_id": "00000000-0000-0000-0000-000000000001",
-  "query": "O que tenho hoje?",
-  "voice": "alloy"
-}
-```
-
-Retorna: `audio/mpeg` com headers `X-ORA-Answer` (resposta em texto, URL-encoded).
-
----
-
-#### Áudio in → áudio out (conversa por voz)
-
-```http
-POST /api/v1/device/speak/converse
-Content-Type: multipart/form-data
-```
-
-| Campo | Tipo |
-|---|---|
-| `audio` | File |
-| `user_id` | String |
-| `voice` | String (opcional) |
-
-Retorna: `audio/mpeg` com headers `X-ORA-Transcript` e `X-ORA-Answer`.
-
----
-
-#### Loop completo de voz com memória automática
-
-```http
-POST /api/v1/voice/loop
-Content-Type: multipart/form-data
-```
-
-Mesmo formato do `speak/converse`. Adicionalmente salva a troca como memória automática no banco.
-
----
-
-### Endpoints Legados
-
-Mantidos para compatibilidade. Prefira os endpoints de `context/` para novos usos.
-
-| Endpoint | Descrição |
-|---|---|
-| `POST /api/v1/device/search` | Busca semântica simples (top 5) |
-| `POST /api/v1/device/respond` | Resposta contextual sem histórico de conversa |
-
----
-
-## Schema do Banco
+## Database Schema
 
 ```sql
--- Memórias semânticas
 memories (
   id          UUID PRIMARY KEY,
   user_id     TEXT NOT NULL,
   content     TEXT NOT NULL,
   summary     TEXT,
   tags        TEXT[],
-  type        TEXT,          -- 'manual' | 'auto' | 'voice-loop'
+  type        TEXT,         -- 'manual' | 'auto' | 'voice-loop'
   voice_used  TEXT,
   metadata    JSONB,
-  embedding   JSONB,         -- vetor text-embedding-3-small
+  embedding   JSONB,        -- text-embedding-3-small vector
   created_at  TIMESTAMP
 )
 
--- Histórico de conversa (últimos 5 turnos)
 conversation_history (
   id         UUID PRIMARY KEY,
   user_id    TEXT NOT NULL,
-  role       TEXT NOT NULL,  -- 'user' | 'assistant'
+  role       TEXT NOT NULL, -- 'user' | 'assistant'
   content    TEXT NOT NULL,
   created_at TIMESTAMP
 )
 
--- Log de respostas geradas
 conversation_logs (
   id            UUID PRIMARY KEY,
   user_id       TEXT NOT NULL,
@@ -450,44 +260,29 @@ conversation_logs (
 )
 ```
 
-Para inicializar ou atualizar o schema em um banco existente:
-
-```bash
-node src/db/init.js
-```
-
-O script usa `CREATE TABLE IF NOT EXISTS` e `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, sendo seguro rodar em bancos já populados.
-
----
-
-## Dashboard
-
-Interface React disponível em `ora-dashboard/`. Acesse após rodar `npm run dev` dentro da pasta.
-
-| Página | Funcionalidade |
-|---|---|
-| Chat | Conversa em tempo real com o ORA usando o pipeline de contexto |
-| Memórias | Listagem, busca semântica e exclusão de memórias |
-| Configurações | Em desenvolvimento |
-
-Para customizar a URL da API ou o usuário padrão, crie um `ora-dashboard/.env` baseado em `ora-dashboard/.env.example`.
+The init script uses `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so it's safe to run on an existing database.
 
 ---
 
 ## Roadmap
 
-| Fase | Nome | Objetivo | Status |
+| Phase | Name | Description | Status |
 |---|---|---|---|
-| 1 | MVP Semântico | Armazenar e buscar por significado | ✅ Concluído |
-| 2 | Memória Viva | Contexto, histórico e guardrails | ✅ Concluído |
-| 3 | Interface | Dashboard e Chat UI | ✅ Concluído (v1) |
-| 4 | Deploy | Supabase / Railway + CI/CD | ⏳ Planejado |
-| 5 | ORA 2.0 | Agente pró-ativo e multimodal | ⏳ Futuro |
+| 1 | Semantic MVP | Store and search by meaning | ✅ Done |
+| 2 | Live Memory | Context, history and guardrails | ✅ Done |
+| 3 | Interface | Dashboard and Chat UI | ✅ Done (v1) |
+| 4 | Deploy | Supabase / Railway + CI/CD | ⏳ Planned |
+| 5 | ORA 2.0 | Proactive agent, multimodal | ⏳ Future |
 
 ---
 
-## Desenvolvido por
+## Contributing
 
-Edgar Brito — Software Developer
+1. Fork the repository
+2. Create a branch: `git checkout -b feat/your-feature`
+3. Commit your changes
+4. Open a pull request with a clear description
 
-> "Building the foundation for personal memory."
+---
+
+Built by [Edgar Brito](https://github.com/edgar-lins) — *"Building the foundation for personal memory."*
