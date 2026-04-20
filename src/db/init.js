@@ -67,6 +67,19 @@ async function init() {
       );
     `);
 
+    // Log de análises proativas (controla frequência e histórico)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS proactive_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        should_notify BOOLEAN DEFAULT false,
+        message TEXT,
+        category TEXT,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     console.log('✅ Tables created/updated successfully');
   } catch (err) {
     console.error('❌ Error initializing DB:', err);

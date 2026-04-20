@@ -17,6 +17,7 @@ import conversationContext from "./routes/conversationContext.js";
 import voiceLoopRoutes from "./routes/voiceLoop.js";
 import googleAuthRoutes from "./routes/googleAuth.js";
 import calendarRoutes from "./routes/calendar.js";
+import proactiveRoutes from "./routes/proactive.js";
 import dotenv from 'dotenv';
 import cors from "cors";
 
@@ -34,6 +35,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use('/api/v1', googleAuthRoutes);
 app.use('/api/v1', calendarRoutes);
+app.use('/api/v1', proactiveRoutes);
 app.use('/api/v1/device', deviceRoutes);
 app.use("/api/v1/device", searchRoutes);
 app.use("/api/v1/device", respondRoutes);

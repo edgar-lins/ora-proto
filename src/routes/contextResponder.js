@@ -80,22 +80,27 @@ router.post("/context/respond", async (req, res) => {
       content: r.content,
     }));
 
-    // 4️⃣ Monta prompt — com contexto se disponível, conversacional se não
-    const systemParts = [`Você é o ORA — um assistente pessoal empático, direto e com personalidade leve.`];
+    // 4️⃣ Monta prompt
+    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const systemParts = [`Você é o ORA — assistente pessoal de vida do usuário. Você é empático, direto, inteligente e age como um amigo próximo que se importa de verdade.
+
+Sua personalidade:
+- Quando o usuário compartilha dados de saúde (peso, altura, exames), você REAGE com inteligência: calcula IMC, identifica riscos, propõe ações concretas
+- Quando menciona objetivos (academia, leitura, trabalho), você ajuda a estruturar e cobra depois
+- Você lembra de tudo e usa isso para ser proativo e relevante
+- NÃO seja genérico. Seja específico com os dados que você tem
+- Responda em 1–3 frases naturais. Para planos ou análises, pode ser um pouco mais longo
+
+Data/hora atual: ${now}`];
 
     if (hasContext) {
-      systemParts.push(`\nContexto de memória:\n${contextBlock}`);
-      systemParts.push(`\nRegras: use apenas fatos do contexto para afirmações específicas. NÃO invente datas ou números. Se não souber, diga "não consta nas minhas memórias".`);
-    } else {
-      systemParts.push(`\nPara saudações e conversas casuais, responda naturalmente. Se perguntarem algo específico que não sabe, diga que ainda não tem memórias sobre isso.`);
+      systemParts.push(`\n\nO que você sabe sobre o usuário:\n${contextBlock}`);
+      systemParts.push(`\n\nUse esses dados para personalizar sua resposta. NÃO invente informações que não estão acima.`);
     }
 
     if (calendarBlock !== null) {
-      systemParts.push(`\nVocê TEM acesso à agenda do usuário via Google Calendar. ${calendarBlock}`);
-      systemParts.push(`\nNUNCA diga que não tem acesso à agenda — você tem. Use os dados acima para responder sobre compromissos.`);
+      systemParts.push(`\n\nVocê TEM acesso à agenda do usuário. ${calendarBlock}\nNUNCA diga que não tem acesso à agenda.`);
     }
-
-    systemParts.push(`\nResponda em 1–2 frases, de forma humana e leve. Data/hora atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`);
 
     const systemPrompt = {
       role: "system",
