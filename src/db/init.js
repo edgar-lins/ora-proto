@@ -52,6 +52,21 @@ async function init() {
       );
     `);
 
+    // Integrações OAuth por usuário (Google Calendar, etc.)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_integrations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        access_token TEXT,
+        refresh_token TEXT,
+        token_expiry TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, provider)
+      );
+    `);
+
     console.log('✅ Tables created/updated successfully');
   } catch (err) {
     console.error('❌ Error initializing DB:', err);
