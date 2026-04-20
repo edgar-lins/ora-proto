@@ -15,6 +15,7 @@ import { useProactiveCheck } from "./src/hooks/useProactiveCheck";
 import { OrbButton } from "./src/components/OrbButton";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
+import { HealthScreen } from "./src/screens/HealthScreen";
 import { API_BASE_URL } from "./src/config/api";
 
 const STATUS_LABELS = {
@@ -25,7 +26,7 @@ const STATUS_LABELS = {
   error: "Algo deu errado",
 };
 
-function MainScreen({ user, onOpenSettings }) {
+function MainScreen({ user, onOpenSettings, onOpenHealth }) {
   const { status, lastAnswer, errorMsg, startRecording, stopAndSend } =
     useVoiceLoop(user.id);
 
@@ -64,6 +65,10 @@ function MainScreen({ user, onOpenSettings }) {
           <Text style={styles.answerText}>{lastAnswer}</Text>
         ) : null}
       </View>
+
+      <Pressable onPress={onOpenHealth} style={styles.healthBtn}>
+        <Text style={styles.healthBtnText}>❤️ Saúde</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -71,6 +76,7 @@ function MainScreen({ user, onOpenSettings }) {
 export default function App() {
   const { user, loading, login, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
 
   useEffect(() => {
@@ -104,8 +110,16 @@ export default function App() {
     );
   }
 
+  if (showHealth) {
+    return <HealthScreen user={user} onBack={() => setShowHealth(false)} />;
+  }
+
   return (
-    <MainScreen user={user} onOpenSettings={() => setShowSettings(true)} />
+    <MainScreen
+      user={user}
+      onOpenSettings={() => setShowSettings(true)}
+      onOpenHealth={() => setShowHealth(true)}
+    />
   );
 }
 
@@ -165,5 +179,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#e63946",
     textAlign: "center",
+  },
+  healthBtn: {
+    alignItems: "center",
+    paddingBottom: 32,
+  },
+  healthBtnText: {
+    color: "#444",
+    fontSize: 14,
   },
 });
