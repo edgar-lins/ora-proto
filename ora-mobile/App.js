@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useVoiceLoop } from "./src/hooks/useVoiceLoop";
 import { useAuth } from "./src/hooks/useAuth";
 import { useReminders } from "./src/hooks/useReminders";
+import { useProactiveCheck } from "./src/hooks/useProactiveCheck";
 import { OrbButton } from "./src/components/OrbButton";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
@@ -81,6 +82,7 @@ export default function App() {
   }, [user]);
 
   useReminders(user?.id, calendarConnected);
+  useProactiveCheck(user?.id);
 
   if (loading) {
     return (
