@@ -7,6 +7,7 @@ import fetch from "node-fetch";
 import { openai } from "../utils/openaiClient.js";
 import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
+import { extractMetricsFromText } from "../utils/healthExtractor.js";
 
 const router = express.Router();
 const storage = multer.diskStorage({
@@ -76,23 +77,29 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     const buffer = Buffer.from(await speech.arrayBuffer());
     await fs.promises.writeFile(tmpAudioPath, buffer);
 
-    // 4️⃣ Salva memória automática
+    // 4️⃣ Salva memória automática + detecta métricas de saúde em paralelo
     const memoryText = `Usuário disse: ${transcript}\nORA respondeu: ${answer}`;
     const id = uuidv4();
 
-    await pool.query(
-      `
-      INSERT INTO memories (id, user_id, content, summary, type, metadata, created_at)
-      VALUES ($1, $2, $3, $4, 'auto', $5, NOW())
-      `,
-      [
-        id,
-        user_id,
-        memoryText,
-        answer.slice(0, 100),
-        { source: "voice-loop" },
-      ]
-    );
+    const [, metrics] = await Promise.all([
+      pool.query(
+        `INSERT INTO memories (id, user_id, content, summary, type, metadata, created_at)
+         VALUES ($1, $2, $3, $4, 'auto', $5, NOW())`,
+        [id, user_id, memoryText, answer.slice(0, 100), { source: "voice-loop" }]
+      ),
+      extractMetricsFromText(transcript),
+    ]);
+
+    if (metrics.length) {
+      for (const m of metrics) {
+        await pool.query(
+          `INSERT INTO health_metrics (user_id, type, value, unit, date)
+           VALUES ($1, $2, $3, $4, CURRENT_DATE)`,
+          [user_id, m.type, m.value, m.unit]
+        );
+      }
+      console.log(`📊 Métricas detectadas [${user_id}]:`, metrics);
+    }
 
     // 5️⃣ Envia resposta em stream de áudio (voz)
     res.setHeader("Content-Type", "audio/mpeg");

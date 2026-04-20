@@ -67,6 +67,35 @@ async function init() {
       );
     `);
 
+    // Métricas de saúde ao longo do tempo
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS health_metrics (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        value NUMERIC,
+        unit TEXT,
+        notes TEXT,
+        date DATE DEFAULT CURRENT_DATE,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Exames médicos enviados pelo usuário
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS health_exams (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        exam_date DATE,
+        exam_type TEXT,
+        file_name TEXT,
+        raw_text TEXT,
+        analysis TEXT,
+        values JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     // Log de análises proativas (controla frequência e histórico)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS proactive_log (
