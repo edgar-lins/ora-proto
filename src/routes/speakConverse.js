@@ -63,7 +63,7 @@ router.post("/speak/converse", upload.single("audio"), async (req, res) => {
     // 3️⃣ Gera o áudio de resposta (TTS)
     const tmpPath = path.join(os.tmpdir(), `ora-converse-${Date.now()}.mp3`);
     const mp3 = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+      model: "tts-1",
       voice,
       input: answerText,
     });

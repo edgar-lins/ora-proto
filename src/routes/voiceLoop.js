@@ -35,7 +35,7 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     // 1️⃣ Transcreve o áudio
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(audioFile.path),
-      model: "gpt-4o-mini-transcribe",
+      model: "whisper-1",
       response_format: "json",
     });
 
@@ -68,7 +68,7 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     // 3️⃣ Gera voz da resposta
     const tmpAudioPath = path.join(os.tmpdir(), `ora-voice-${Date.now()}.mp3`);
     const speech = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+      model: "tts-1",
       voice,
       input: answer,
     });

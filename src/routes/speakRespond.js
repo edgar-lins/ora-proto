@@ -41,7 +41,7 @@ router.post("/speak/respond", async (req, res) => {
     // 2️⃣ gera o áudio (TTS)
     const tmpPath = path.join(os.tmpdir(), `ora-tts-${Date.now()}.mp3`);
     const mp3 = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+      model: "tts-1",
       voice,
       input: answerText,
     });

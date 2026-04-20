@@ -2,6 +2,7 @@ import express from "express";
 import { pool } from "../db/index.js";
 import { openai } from "../utils/openaiClient.js";
 import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
+import { getTodayEvents } from "../utils/calendarService.js";
 
 const router = express.Router();
 
@@ -49,22 +50,20 @@ router.post("/context/respond", async (req, res) => {
       .slice(0, limit);
 
     const topSim = scored[0]?.similarity ?? 0;
+    const hasContext = topSim >= SIMILARITY_MIN;
 
-    // 🔒 Evita respostas "chutadas" se o contexto for fraco
-    if (topSim < SIMILARITY_MIN) {
-      return res.json({
-        status: "ok",
-        query,
-        answer:
-          "Não encontrei detalhes confiáveis nas minhas memórias para afirmar isso. Pode me lembrar rapidinho do que se trata?",
-        context_used: "",
-        conversation_used: [],
-      });
-    }
+    // Busca agenda do dia (se usuário tiver Google Calendar conectado)
+    const calendarEvents = await getTodayEvents(user_id).catch(() => null);
+    // null = sem integração, [] = integração ativa mas dia livre
+    const calendarBlock = calendarEvents === null
+      ? null
+      : calendarEvents.length
+        ? `Agenda de hoje:\n${calendarEvents.join("\n")}`
+        : `Agenda de hoje: nenhum compromisso agendado.`;
 
-    const contextBlock = scored
-      .map((m, i) => `(${i + 1}) ${m.summary || m.content}`)
-      .join("\n");
+    const contextBlock = hasContext
+      ? scored.map((m, i) => `(${i + 1}) ${m.summary || m.content}`).join("\n")
+      : "";
 
     // 3️⃣ Busca histórico recente
     const { rows: recentHistory } = await pool.query(
@@ -81,21 +80,26 @@ router.post("/context/respond", async (req, res) => {
       content: r.content,
     }));
 
-    // 4️⃣ Monta prompt com guardrails anti-alucinação
+    // 4️⃣ Monta prompt — com contexto se disponível, conversacional se não
+    const systemParts = [`Você é o ORA — um assistente pessoal empático, direto e com personalidade leve.`];
+
+    if (hasContext) {
+      systemParts.push(`\nContexto de memória:\n${contextBlock}`);
+      systemParts.push(`\nRegras: use apenas fatos do contexto para afirmações específicas. NÃO invente datas ou números. Se não souber, diga "não consta nas minhas memórias".`);
+    } else {
+      systemParts.push(`\nPara saudações e conversas casuais, responda naturalmente. Se perguntarem algo específico que não sabe, diga que ainda não tem memórias sobre isso.`);
+    }
+
+    if (calendarBlock !== null) {
+      systemParts.push(`\nVocê TEM acesso à agenda do usuário via Google Calendar. ${calendarBlock}`);
+      systemParts.push(`\nNUNCA diga que não tem acesso à agenda — você tem. Use os dados acima para responder sobre compromissos.`);
+    }
+
+    systemParts.push(`\nResponda em 1–2 frases, de forma humana e leve. Data/hora atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`);
+
     const systemPrompt = {
       role: "system",
-      content: `
-Você é o ORA — um assistente pessoal empático e natural.
-Regras de ouro:
-- Use apenas fatos presentes no "Contexto de memória".
-- NÃO invente datas, nomes, horários ou números. Se o dado não estiver no contexto, diga "não consta nas minhas memórias".
-- Prefira repetir o formato do contexto (ex: "sexta-feira"), sem criar novas datas.
-- Seja claro e direto; evite termos como "caro usuário" ou "big day".
-- Responda em 1–2 frases, de forma humana e leve.
-
-Contexto de memória:
-${contextBlock}
-`.trim(),
+      content: systemParts.join(""),
     };
 
     const messages = [

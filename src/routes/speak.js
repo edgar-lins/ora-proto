@@ -24,7 +24,7 @@ router.post("/speak", async (req, res) => {
 
     // chama a API de TTS
     const mp3 = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+      model: "tts-1",
       voice,
       input: text,
     });
