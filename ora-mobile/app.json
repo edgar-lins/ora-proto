@@ -36,7 +36,15 @@
         }
       ],
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#4361ee",
+          "sounds": []
+        }
+      ]
     ]
   }
 }

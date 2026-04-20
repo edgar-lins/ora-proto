@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   Text,
@@ -10,9 +10,11 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useVoiceLoop } from "./src/hooks/useVoiceLoop";
 import { useAuth } from "./src/hooks/useAuth";
+import { useReminders } from "./src/hooks/useReminders";
 import { OrbButton } from "./src/components/OrbButton";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
+import { API_BASE_URL } from "./src/config/api";
 
 const STATUS_LABELS = {
   idle: "Segure para falar",
@@ -68,6 +70,17 @@ function MainScreen({ user, onOpenSettings }) {
 export default function App() {
   const { user, loading, login, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${API_BASE_URL}/api/v1/auth/google/status/${encodeURIComponent(user.id)}`)
+      .then((r) => r.json())
+      .then((d) => setCalendarConnected(d.connected ?? false))
+      .catch(() => {});
+  }, [user]);
+
+  useReminders(user?.id, calendarConnected);
 
   if (loading) {
     return (
