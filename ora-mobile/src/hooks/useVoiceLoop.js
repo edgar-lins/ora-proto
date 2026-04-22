@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Notifications from "expo-notifications";
 import { API_BASE_URL } from "../config/api";
 
 const VOICE_LOOP_URL = `${API_BASE_URL}/api/v1/device/voice/loop`;
@@ -66,6 +67,20 @@ export function useVoiceLoop(userId) {
 
       const answerEncoded = response.headers.get("X-ORA-Answer");
       if (answerEncoded) setLastAnswer(decodeURIComponent(answerEncoded));
+
+      const actionEncoded = response.headers.get("X-ORA-Action");
+      if (actionEncoded) {
+        const action = JSON.parse(decodeURIComponent(actionEncoded));
+        if (action.type === "set_reminder") {
+          const triggerDate = new Date(`${action.date}T${action.time}:00`);
+          if (triggerDate > new Date()) {
+            await Notifications.scheduleNotificationAsync({
+              content: { title: "ORA — Lembrete", body: action.message, sound: true },
+              trigger: triggerDate,
+            });
+          }
+        }
+      }
 
       const arrayBuffer = await response.arrayBuffer();
       const base64 = arrayBufferToBase64(arrayBuffer);

@@ -2,7 +2,8 @@ import express from "express";
 import { pool } from "../db/index.js";
 import { openai } from "../utils/openaiClient.js";
 import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
-import { getTodayEvents } from "../utils/calendarService.js";
+import { getTodayEvents, createCalendarEvent } from "../utils/calendarService.js";
+import { v4 as uuid } from "uuid";
 
 async function getHealthContext(pool, user_id) {
   const [metricsRes, examsRes] = await Promise.all([
@@ -48,6 +49,81 @@ const router = express.Router();
 
 // 🔒 Limiar mínimo de confiança para usar contexto
 const SIMILARITY_MIN = 0.35;
+
+// Ferramentas que a ORA pode executar
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "create_calendar_event",
+      description: "Cria um evento no Google Calendar quando o usuário pede para agendar algo",
+      parameters: {
+        type: "object",
+        properties: {
+          title:            { type: "string", description: "Título do evento" },
+          date:             { type: "string", description: "Data no formato YYYY-MM-DD (use a data atual do contexto como referência)" },
+          time:             { type: "string", description: "Horário de início no formato HH:MM" },
+          duration_minutes: { type: "number", description: "Duração em minutos — padrão 60 se não especificado" },
+        },
+        required: ["title", "date", "time"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_memory",
+      description: "Salva uma memória explícita quando o usuário pede para ORA lembrar de algo (ex: 'ORA, lembra que...', 'anota isso', 'guarda isso')",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "Conteúdo exato a ser memorizado" },
+        },
+        required: ["content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_reminder",
+      description: "Agenda um lembrete para uma hora específica quando o usuário pede para ser lembrado de algo",
+      parameters: {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Mensagem do lembrete" },
+          date:    { type: "string", description: "Data no formato YYYY-MM-DD" },
+          time:    { type: "string", description: "Horário no formato HH:MM" },
+        },
+        required: ["message", "date", "time"],
+      },
+    },
+  },
+];
+
+async function executeTool(name, args, user_id) {
+  switch (name) {
+    case "create_calendar_event": {
+      const result = await createCalendarEvent(user_id, args);
+      return { ok: true, ...result };
+    }
+    case "save_memory": {
+      const embedding = await generateEmbedding(args.content);
+      await pool.query(
+        `INSERT INTO memories (id, user_id, content, summary, type, metadata, embedding, created_at)
+         VALUES ($1, $2, $3, $4, 'explicit', $5, $6, NOW())`,
+        [uuid(), user_id, args.content, args.content.slice(0, 100), JSON.stringify({ source: "voice_action" }), JSON.stringify(embedding)]
+      );
+      return { ok: true, saved: args.content };
+    }
+    case "set_reminder": {
+      // Executado no client via X-ORA-Action — apenas valida e devolve os dados
+      return { ok: true, scheduled: true, message: args.message, date: args.date, time: args.time };
+    }
+    default:
+      return { ok: false, error: "Ferramenta desconhecida" };
+  }
+}
 
 /**
  * POST /api/v1/device/context/respond
@@ -167,15 +243,58 @@ Data/hora atual: ${now}`];
       { role: "user", content: query },
     ];
 
-    // 5️⃣ Gera resposta com GPT
+    // 5️⃣ Gera resposta com GPT (com suporte a function calling)
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
+      tools: TOOLS,
+      tool_choice: "auto",
       temperature: 0.5,
       max_tokens: 600,
     });
 
-    const answer = completion.choices?.[0]?.message?.content?.trim();
+    const firstChoice = completion.choices?.[0];
+    let answer;
+    let actionResult = null;
+
+    if (firstChoice?.finish_reason === "tool_calls") {
+      // GPT quer executar uma ação
+      const toolCalls = firstChoice.message.tool_calls;
+      const toolResults = [];
+
+      for (const call of toolCalls) {
+        const args = JSON.parse(call.function.arguments);
+        const result = await executeTool(call.function.name, args, user_id).catch((err) => ({
+          ok: false, error: err.message,
+        }));
+        toolResults.push({ call, result });
+
+        // Guarda o set_reminder para enviar ao client
+        if (call.function.name === "set_reminder" && result.ok) {
+          actionResult = { type: "set_reminder", ...result };
+        }
+      }
+
+      // Segunda chamada: GPT gera confirmação verbal com os resultados
+      const followUp = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          ...messages,
+          firstChoice.message,
+          ...toolResults.map(({ call, result }) => ({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify(result),
+          })),
+        ],
+        temperature: 0.5,
+        max_tokens: 200,
+      });
+
+      answer = followUp.choices?.[0]?.message?.content?.trim();
+    } else {
+      answer = firstChoice?.message?.content?.trim();
+    }
 
     // 6️⃣ Salva no histórico
     await pool.query(
@@ -189,6 +308,7 @@ Data/hora atual: ${now}`];
       status: "ok",
       query,
       answer,
+      action: actionResult,
       context_used: contextBlock,
       conversation_used: conversationHistory,
     });

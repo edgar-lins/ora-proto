@@ -102,3 +102,61 @@ export async function getUpcomingEvents(user_id, withinMinutes = 30) {
 
   return response.data.items || [];
 }
+
+/**
+ * Cria um evento no Google Calendar do usuário.
+ * @param {string} user_id
+ * @param {string} title
+ * @param {string} date  - formato YYYY-MM-DD
+ * @param {string} time  - formato HH:MM
+ * @param {number} duration_minutes
+ */
+export async function createCalendarEvent(user_id, { title, date, time, duration_minutes = 60 }) {
+  const { rows } = await pool.query(
+    `SELECT access_token, refresh_token, token_expiry
+     FROM user_integrations
+     WHERE user_id = $1 AND provider = 'google'`,
+    [user_id]
+  );
+
+  if (!rows.length) throw new Error("Google Calendar não conectado");
+
+  const { access_token, refresh_token, token_expiry } = rows[0];
+  const oauth2Client = getOAuthClient();
+  oauth2Client.setCredentials({
+    access_token,
+    refresh_token,
+    expiry_date: token_expiry ? new Date(token_expiry).getTime() : undefined,
+  });
+
+  oauth2Client.on("tokens", async (tokens) => {
+    await pool.query(
+      `UPDATE user_integrations SET access_token = $1, token_expiry = $2, updated_at = NOW()
+       WHERE user_id = $3 AND provider = 'google'`,
+      [tokens.access_token, new Date(tokens.expiry_date), user_id]
+    );
+  });
+
+  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+
+  const start = new Date(`${date}T${time}:00`);
+  const end   = new Date(start.getTime() + duration_minutes * 60 * 1000);
+
+  const event = await calendar.events.insert({
+    calendarId: "primary",
+    requestBody: {
+      summary: title,
+      start: { dateTime: start.toISOString(), timeZone: "America/Sao_Paulo" },
+      end:   { dateTime: end.toISOString(),   timeZone: "America/Sao_Paulo" },
+    },
+  });
+
+  return {
+    id: event.data.id,
+    title,
+    date,
+    time,
+    duration_minutes,
+    htmlLink: event.data.htmlLink,
+  };
+}
