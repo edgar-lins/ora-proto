@@ -49,6 +49,15 @@ export function SettingsScreen({ user, onBack, onLogout }) {
     await WebBrowser.openBrowserAsync(url);
   };
 
+  const handleDisconnectCalendar = async () => {
+    try {
+      await fetch(`${API_BASE_URL}/api/v1/auth/google/disconnect/${encodeURIComponent(user.id)}`, {
+        method: "DELETE",
+      });
+      setCalendarConnected(false);
+    } catch (_) {}
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -87,8 +96,13 @@ export function SettingsScreen({ user, onBack, onLogout }) {
           {checkingStatus ? (
             <ActivityIndicator color="#4361ee" />
           ) : calendarConnected ? (
-            <View style={styles.connectedBadge}>
-              <Text style={styles.connectedText}>✓ Ativo</Text>
+            <View style={styles.connectedActions}>
+              <View style={styles.connectedBadge}>
+                <Text style={styles.connectedText}>✓ Ativo</Text>
+              </View>
+              <Pressable onPress={handleDisconnectCalendar} style={styles.disconnectBtn}>
+                <Text style={styles.disconnectText}>Desconectar</Text>
+              </Pressable>
             </View>
           ) : (
             <Pressable
@@ -152,6 +166,10 @@ const styles = StyleSheet.create({
   },
   integrationName: { color: "#fff", fontSize: 15, marginBottom: 4 },
   integrationDesc: { color: "#555", fontSize: 12 },
+  connectedActions: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
   connectedBadge: {
     backgroundColor: "#0d2e1a",
     borderRadius: 8,
@@ -159,6 +177,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   connectedText: { color: "#2ec4b6", fontSize: 13, fontWeight: "600" },
+  disconnectBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  disconnectText: { color: "#555", fontSize: 12, textDecorationLine: "underline" },
   connectBtn: {
     backgroundColor: "#4361ee",
     borderRadius: 8,

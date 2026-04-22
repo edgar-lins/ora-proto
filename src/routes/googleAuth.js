@@ -92,4 +92,21 @@ router.get("/auth/google/status/:user_id", async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/v1/auth/google/disconnect/:user_id
+ * Remove a integração com o Google Calendar do usuário
+ */
+router.delete("/auth/google/disconnect/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+  try {
+    await pool.query(
+      `DELETE FROM user_integrations WHERE user_id = $1 AND provider = 'google'`,
+      [user_id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
