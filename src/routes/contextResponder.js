@@ -4,6 +4,46 @@ import { openai } from "../utils/openaiClient.js";
 import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
 import { getTodayEvents } from "../utils/calendarService.js";
 
+async function getHealthContext(pool, user_id) {
+  const [metricsRes, examsRes] = await Promise.all([
+    pool.query(
+      `SELECT DISTINCT ON (type) type, value, unit, date
+       FROM health_metrics WHERE user_id = $1
+       ORDER BY type, date DESC`,
+      [user_id]
+    ),
+    pool.query(
+      `SELECT exam_type, exam_date, analysis, values
+       FROM health_exams WHERE user_id = $1
+       ORDER BY created_at DESC LIMIT 5`,
+      [user_id]
+    ),
+  ]);
+
+  const parts = [];
+
+  if (metricsRes.rows.length) {
+    const metrics = metricsRes.rows
+      .map((m) => `${m.type}: ${m.value} ${m.unit} (${new Date(m.date).toLocaleDateString("pt-BR")})`)
+      .join(", ");
+    parts.push(`Métricas de saúde: ${metrics}`);
+  }
+
+  if (examsRes.rows.length) {
+    const exams = examsRes.rows.map((e) => {
+      const date = e.exam_date
+        ? new Date(e.exam_date).toLocaleDateString("pt-BR")
+        : "data não informada";
+      const data = typeof e.values === "string" ? JSON.parse(e.values) : e.values;
+      const alerts = data?.alerts?.length ? ` Alertas: ${data.alerts.join("; ")}` : "";
+      return `${e.exam_type} (${date}): ${e.analysis}.${alerts}`;
+    });
+    parts.push(`Exames médicos:\n${exams.map((e) => `- ${e}`).join("\n")}`);
+  }
+
+  return parts.length ? parts.join("\n\n") : null;
+}
+
 const router = express.Router();
 
 // 🔒 Limiar mínimo de confiança para usar contexto
@@ -52,8 +92,11 @@ router.post("/context/respond", async (req, res) => {
     const topSim = scored[0]?.similarity ?? 0;
     const hasContext = topSim >= SIMILARITY_MIN;
 
-    // Busca agenda do dia (se usuário tiver Google Calendar conectado)
-    const calendarEvents = await getTodayEvents(user_id).catch(() => null);
+    // Busca agenda e saúde em paralelo
+    const [calendarEvents, healthContext] = await Promise.all([
+      getTodayEvents(user_id).catch(() => null),
+      getHealthContext(pool, user_id).catch(() => null),
+    ]);
     // null = sem integração, [] = integração ativa mas dia livre
     const calendarBlock = calendarEvents === null
       ? null
@@ -89,7 +132,8 @@ Sua personalidade:
 - Quando menciona objetivos (academia, leitura, trabalho), você ajuda a estruturar e cobra depois
 - Você lembra de tudo e usa isso para ser proativo e relevante
 - NÃO seja genérico. Seja específico com os dados que você tem
-- Responda em 1–3 frases naturais. Para planos ou análises, pode ser um pouco mais longo
+- Suas respostas são lidas em voz alta. NUNCA use markdown, asteriscos, hashtags ou listas com travessão. Escreva como se estivesse falando.
+- Para respostas curtas: 1 a 3 frases. Para planos completos (dieta, treino, rotina): seja detalhado e fluido, sem cortar no meio.
 
 Data/hora atual: ${now}`];
 
@@ -100,6 +144,10 @@ Data/hora atual: ${now}`];
 
     if (calendarBlock !== null) {
       systemParts.push(`\n\nVocê TEM acesso à agenda do usuário. ${calendarBlock}\nNUNCA diga que não tem acesso à agenda.`);
+    }
+
+    if (healthContext) {
+      systemParts.push(`\n\nDados de saúde do usuário (use sempre que relevante):\n${healthContext}\nNUNCA diga que não tem acesso a exames ou métricas — você tem.`);
     }
 
     const systemPrompt = {
@@ -118,7 +166,7 @@ Data/hora atual: ${now}`];
       model: "gpt-4o-mini",
       messages,
       temperature: 0.5,
-      max_tokens: 180,
+      max_tokens: 600,
     });
 
     const answer = completion.choices?.[0]?.message?.content?.trim();
