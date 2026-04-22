@@ -26,7 +26,7 @@ const upload = multer({ storage });
  */
 router.post("/voice/loop", upload.single("audio"), async (req, res) => {
   try {
-    const { user_id, voice = "alloy" } = req.body || {};
+    const { user_id, voice = "onyx", city = null } = req.body || {};
     const audioFile = req.file;
 
     if (!user_id || !audioFile) {
@@ -52,7 +52,7 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     const contextResp = await fetch(`${baseUrl}/api/v1/device/context/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id, query: transcript }),
+      body: JSON.stringify({ user_id, query: transcript, city }),
     });
 
     const contextJson = await contextResp.json();

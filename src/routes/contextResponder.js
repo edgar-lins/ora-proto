@@ -131,7 +131,7 @@ async function executeTool(name, args, user_id) {
  */
 router.post("/context/respond", async (req, res) => {
   try {
-    const { user_id, query, limit = 5 } = req.body;
+    const { user_id, query, limit = 5, city = null } = req.body;
     if (!user_id || !query) {
       return res.status(400).json({ error: "Missing user_id or query" });
     }
@@ -200,7 +200,34 @@ router.post("/context/respond", async (req, res) => {
     }));
 
     // 4️⃣ Monta prompt
-    const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const nowDate = new Date();
+    const now = nowDate.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const hour = parseInt(nowDate.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "numeric", hour12: false }));
+
+    const timePeriod = hour >= 5 && hour < 12 ? "manhã"
+      : hour >= 12 && hour < 18 ? "tarde"
+      : hour >= 18 && hour < 22 ? "noite"
+      : "madrugada";
+
+    const timeBehavior = {
+      manhã:    "Edgar está começando o dia. Pode perguntar sobre como dormiu, energia e planos do dia. Tom energético e focado.",
+      tarde:    "Edgar está no meio do dia. Foque em produtividade, tarefas em aberto e objetivos. Seja direto e orientado a ação.",
+      noite:    "Edgar está encerrando o dia. Tom mais tranquilo. Pode refletir sobre o que foi feito, hábitos e recuperação.",
+      madrugada:"É tarde da noite. Respostas bem curtas. Se relevante, mencione a importância do descanso sem ser chato.",
+    }[timePeriod];
+
+    // Busca clima se tiver localização
+    let weatherLine = "";
+    if (city) {
+      try {
+        const wRes = await fetch(`https://wttr.in/${encodeURIComponent(city)}?format=%C+%t`, { signal: AbortSignal.timeout(3000) });
+        if (wRes.ok) {
+          const wText = (await wRes.text()).trim();
+          weatherLine = `\nClima em ${city}: ${wText}`;
+        }
+      } catch (_) {}
+    }
+
     const systemParts = [`Você é ORA — assistente pessoal de Edgar Lins. Pense em si mesmo como o JARVIS do Tony Stark: inteligente, leal, preciso, com humor seco e presença discreta. Você conhece Edgar há anos e age como tal.
 
 Como você fala:
@@ -217,7 +244,8 @@ Como você age:
 - Você lembra de tudo e conecta pontos sem esperar ser perguntado. Use o contexto disponível ativamente
 - Quando calcular ou inferir algo, deixe claro que é uma inferência — "com base no que você me disse..." ou "pelos dados que tenho..."
 
-Data/hora atual: ${now}`];
+Data/hora atual: ${now}
+Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
 
     if (hasContext) {
       systemParts.push(`\n\nO que você sabe sobre o usuário:\n${contextBlock}`);

@@ -36,6 +36,12 @@
         }
       ],
       "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ORA usa sua localização para personalizar respostas com clima e contexto local."
+        }
+      ],
       "expo-web-browser",
       [
         "expo-notifications",

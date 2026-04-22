@@ -14,6 +14,7 @@ import { useReminders } from "./src/hooks/useReminders";
 import { useProactiveCheck } from "./src/hooks/useProactiveCheck";
 import { useMorningBriefing } from "./src/hooks/useMorningBriefing";
 import { useWakeWord } from "./src/hooks/useWakeWord";
+import { useLocation } from "./src/hooks/useLocation";
 import { OrbButton } from "./src/components/OrbButton";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
@@ -35,9 +36,9 @@ const STATUS_LABELS_BRIEFING = {
   speaking: "ORA falando...",
 };
 
-function MainScreen({ user, onOpenSettings, onOpenHealth }) {
+function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
   const { status, lastAnswer, errorMsg, startRecording, stopAndSend } =
-    useVoiceLoop(user.id);
+    useVoiceLoop(user.id, city);
   const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
 
   const isBusy = briefingPlaying || status === "recording" || status === "thinking" || status === "speaking" || status === "listening";
@@ -107,6 +108,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
+  const city = useLocation();
 
   useEffect(() => {
     if (!user) return;
@@ -146,6 +148,7 @@ export default function App() {
   return (
     <MainScreen
       user={user}
+      city={city}
       onOpenSettings={() => setShowSettings(true)}
       onOpenHealth={() => setShowHealth(true)}
     />

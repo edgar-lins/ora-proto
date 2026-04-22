@@ -22,7 +22,7 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-export function useVoiceLoop(userId) {
+export function useVoiceLoop(userId, city = null) {
   const [status, setStatus] = useState("idle");
   const [lastAnswer, setLastAnswer] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -57,6 +57,7 @@ export function useVoiceLoop(userId) {
       formData.append("audio", { uri, name: "ora-input.m4a", type: "audio/m4a" });
       formData.append("user_id", userId);
       formData.append("voice", "onyx");
+      if (city) formData.append("city", city);
 
       const response = await fetch(VOICE_LOOP_URL, { method: "POST", body: formData });
 
