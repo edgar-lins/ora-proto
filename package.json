@@ -22,6 +22,8 @@
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "expo": "^55.0.17",
+    "expo-location": "~55.1.8",
     "express": "^5.1.0",
     "googleapis": "^171.4.0",
     "multer": "^2.0.2",
