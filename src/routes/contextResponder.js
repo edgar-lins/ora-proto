@@ -145,6 +145,21 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "complete_task",
+      description: "Marca uma tarefa de meta como concluída ou não quando o usuário confirma se fez. Use quando o usuário responder a um check-in de tarefa.",
+      parameters: {
+        type: "object",
+        properties: {
+          task_id:   { type: "string",  description: "ID da tarefa" },
+          completed: { type: "boolean", description: "true se concluída, false se não" },
+        },
+        required: ["task_id", "completed"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "schedule_goal_in_calendar",
       description: "Agenda todas as tarefas de uma meta no Google Calendar quando o usuário pede para organizar o plano na agenda. Usa a meta ativa mais recente se goal_id não for fornecido.",
       parameters: {
@@ -205,6 +220,13 @@ async function executeTool(name, args, user_id) {
         ? { ok: true, goal_id: data.goal_id, title: data.title, tasks_count: args.tasks.length }
         : { ok: false, error: data.error };
     }
+    case "complete_task": {
+      await pool.query(
+        `UPDATE goal_tasks SET completed = $1, completed_at = $2 WHERE id = $3`,
+        [args.completed, args.completed ? new Date() : null, args.task_id]
+      );
+      return { ok: true, task_id: args.task_id, completed: args.completed };
+    }
     case "schedule_goal_in_calendar": {
       // Busca a meta — usa goal_id fornecido ou a mais recente ativa
       const goalQuery = args.goal_id
@@ -243,7 +265,13 @@ async function executeTool(name, args, user_id) {
         if (result) created++; else failed++;
       }
 
-      return { ok: true, goal_title: goal.title, created, failed, total: tasks.length };
+      const taskList = tasks.map((t) => ({
+        id: t.id,
+        date: t.date.toISOString().slice(0, 10),
+        type: t.type,
+        description: t.description,
+      }));
+      return { ok: true, goal_title: goal.title, created, failed, total: tasks.length, tasks: taskList };
     }
     case "show_screen": {
       return { ok: true, screen: args.screen };
@@ -259,7 +287,7 @@ async function executeTool(name, args, user_id) {
  */
 router.post("/context/respond", async (req, res) => {
   try {
-    const { user_id, query, limit = 5, city = null } = req.body;
+    const { user_id, query, limit = 5, city = null, extra_context = null } = req.body;
     if (!user_id || !query) {
       return res.status(400).json({ error: "Missing user_id or query" });
     }
@@ -394,6 +422,10 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
       systemParts.push(`\n\nDados de saúde do usuário (use sempre que relevante):\n${healthContext}\nNUNCA diga que não tem acesso a exames ou métricas — você tem.`);
     }
 
+    if (extra_context) {
+      systemParts.push(`\n\n${extra_context}`);
+    }
+
     const systemPrompt = {
       role: "system",
       content: systemParts.join(""),
@@ -439,6 +471,9 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
         }
         if (call.function.name === "create_goal_plan" && result.ok) {
           actionResult = { type: "show_screen", screen: "goals" };
+        }
+        if (call.function.name === "schedule_goal_in_calendar" && result.ok) {
+          actionResult = { type: "schedule_goal_notifications", goal_title: result.goal_title, tasks: result.tasks ?? [] };
         }
       }
 

@@ -3,6 +3,7 @@ import {
   StyleSheet, Text, View, StatusBar,
   ActivityIndicator, Pressable, Animated,
 } from "react-native";
+import * as Notifications from "expo-notifications";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useVoiceLoop } from "./src/hooks/useVoiceLoop";
 import { useAuth } from "./src/hooks/useAuth";
@@ -29,12 +30,14 @@ const STATUS_LABELS = {
   error:     "Algo deu errado",
 };
 
-function MainScreen({ user, onOpenSettings, city }) {
+function MainScreen({ user, onOpenSettings, city, initialCheckin = null }) {
+  const [checkinTask, setCheckinTask] = useState(initialCheckin);
+
   const {
     status, lastAnswer, lastTranscript, activeContexts,
     errorMsg, pendingScreen, clearPendingScreen,
     startRecording, stopAndSend,
-  } = useVoiceLoop(user.id, city);
+  } = useVoiceLoop(user.id, city, checkinTask);
 
   const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
   const { insight } = useProactiveInsight(user.id);
@@ -48,6 +51,15 @@ function MainScreen({ user, onOpenSettings, city }) {
     if (pendingScreen === "goals")  { setShowGoals(true);  clearPendingScreen(); }
     if (pendingScreen === "health") { setShowHealth(true); clearPendingScreen(); }
   }, [pendingScreen]);
+
+  // Auto-speak check-in question when arriving from notification
+  useEffect(() => {
+    if (!checkinTask) return;
+    const timer = setTimeout(() => {
+      if (status === "idle") startRecording();
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [checkinTask]);
 
   // Answer fade-in
   const answerOpacity = useRef(new Animated.Value(1)).current;
@@ -124,6 +136,17 @@ function MainScreen({ user, onOpenSettings, city }) {
         ) : null}
       </View>
 
+      {/* Check-in banner */}
+      {checkinTask && (
+        <View style={styles.checkinBanner}>
+          <Text style={styles.checkinLabel}>CHECK-IN</Text>
+          <Text style={styles.checkinDesc} numberOfLines={2}>{checkinTask.description}</Text>
+          <Pressable onPress={() => setCheckinTask(null)} style={styles.checkinDismiss}>
+            <Text style={styles.checkinDismissText}>✕</Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* Holographic overlay: Goals */}
       <HolographicPanel
         visible={showGoals}
@@ -149,7 +172,19 @@ export default function App() {
   const { user, loading, login, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
+  const [checkinTask, setCheckinTask] = useState(null);
   const city = useLocation();
+
+  // Captura toque em notificação de check-in de meta
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      if (data?.type === "goal_checkin") {
+        setCheckinTask({ task_id: data.task_id, description: data.description, goal_title: data.goal_title });
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -186,6 +221,7 @@ export default function App() {
       user={user}
       city={city}
       onOpenSettings={() => setShowSettings(true)}
+      initialCheckin={checkinTask}
     />
   );
 }
@@ -253,6 +289,36 @@ const styles = StyleSheet.create({
     color: "#7f1d1d",
     textAlign: "center",
   },
+  checkinBanner: {
+    position: "absolute",
+    bottom: 110,
+    left: 24,
+    right: 24,
+    backgroundColor: "rgba(2, 10, 28, 0.95)",
+    borderWidth: 1,
+    borderColor: "rgba(0,200,255,0.35)",
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  checkinLabel: {
+    fontSize: 9,
+    color: "#00c8ff",
+    letterSpacing: 2,
+    fontWeight: "700",
+    minWidth: 60,
+  },
+  checkinDesc: {
+    flex: 1,
+    fontSize: 12,
+    color: "#aaa",
+    lineHeight: 17,
+  },
+  checkinDismiss: { padding: 4 },
+  checkinDismissText: { color: "#00c8ff", fontSize: 12 },
   insightText: {
     fontSize: 15,
     color: "#a07830",

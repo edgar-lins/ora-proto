@@ -116,7 +116,7 @@ const upload = multer({ storage });
  */
 router.post("/voice/loop", upload.single("audio"), async (req, res) => {
   try {
-    const { user_id, voice = "onyx", city = null } = req.body || {};
+    const { user_id, voice = "onyx", city = null, checkin_task_id = null, checkin_description = null } = req.body || {};
     const audioFile = req.file;
 
     if (!user_id || !audioFile) {
@@ -139,10 +139,14 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
 
     // 2️⃣ Gera resposta contextual usando o pipeline existente
     const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const extraContext = checkin_task_id
+      ? `TAREFA PARA CHECAR: "${checkin_description}" (task_id: ${checkin_task_id}). O usuário está respondendo se conseguiu completar essa tarefa. Se confirmar, chame complete_task com esse task_id.`
+      : null;
+
     const contextResp = await fetch(`${baseUrl}/api/v1/device/context/respond`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id, query: transcript, city }),
+      body: JSON.stringify({ user_id, query: transcript, city, extra_context: extraContext }),
     });
 
     const contextJson = await contextResp.json();

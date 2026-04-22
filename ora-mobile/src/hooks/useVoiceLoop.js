@@ -35,7 +35,30 @@ async function createRecordingWithRetry(options, maxAttempts = 3) {
   }
 }
 
-export function useVoiceLoop(userId, city = null) {
+const TYPE_TIMES = { treino: "07:00", dieta: "12:00", habito: "20:00" };
+
+async function scheduleTaskNotifications(tasks, goal_title) {
+  const now = new Date();
+  for (const task of tasks) {
+    const time = TYPE_TIMES[task.type] ?? "08:00";
+    const [h, m] = time.split(":").map(Number);
+    const trigger = new Date(`${task.date}T${time}:00`);
+    trigger.setHours(h, m, 0, 0);
+    if (trigger <= now) continue; // já passou
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "ORA",
+        body: `${task.description}`,
+        data: { type: "goal_checkin", task_id: task.id, description: task.description, goal_title },
+        sound: true,
+      },
+      trigger,
+    }).catch(() => {});
+  }
+}
+
+export function useVoiceLoop(userId, city = null, checkinTask = null) {
   const [status, setStatus] = useState("idle");
   const [lastAnswer, setLastAnswer] = useState("");
   const [lastTranscript, setLastTranscript] = useState("");
@@ -74,6 +97,10 @@ export function useVoiceLoop(userId, city = null) {
       formData.append("user_id", userId);
       formData.append("voice", "onyx");
       if (city) formData.append("city", city);
+      if (checkinTask) {
+        formData.append("checkin_task_id", checkinTask.task_id);
+        formData.append("checkin_description", checkinTask.description);
+      }
 
       const response = await fetch(VOICE_LOOP_URL, { method: "POST", body: formData });
 
@@ -105,6 +132,9 @@ export function useVoiceLoop(userId, city = null) {
         }
         if (action.type === "show_screen") {
           setPendingScreen(action.screen);
+        }
+        if (action.type === "schedule_goal_notifications" && action.tasks?.length) {
+          scheduleTaskNotifications(action.tasks, action.goal_title).catch(() => {});
         }
       }
 
