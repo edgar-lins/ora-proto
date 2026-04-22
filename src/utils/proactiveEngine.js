@@ -1,90 +1,149 @@
 import { pool } from "../db/index.js";
 import { openai } from "./openaiClient.js";
 
-/**
- * Analisa as memórias do usuário e decide se ORA tem algo relevante a dizer.
- * Usa o histórico de mensagens já enviadas para nunca repetir — só evoluir.
- */
 export async function analyzeAndSuggest(user_id) {
-  // Busca memórias e histórico de insights anteriores em paralelo
-  const [memoriesResult, historyResult] = await Promise.all([
+  const now = new Date();
+  const nowStr = now.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+
+  const [memoriesRes, metricsRes, examsRes, goalsRes, pastInsightsRes] = await Promise.all([
     pool.query(
-      `SELECT content, created_at
-       FROM memories
-       WHERE user_id = $1
-       ORDER BY created_at DESC
-       LIMIT 80`,
+      `SELECT content, created_at FROM memories
+       WHERE user_id = $1 ORDER BY created_at DESC LIMIT 60`,
+      [user_id]
+    ),
+    pool.query(
+      `SELECT DISTINCT ON (type) type, value, unit, date
+       FROM health_metrics WHERE user_id = $1
+       ORDER BY type, date DESC`,
+      [user_id]
+    ),
+    pool.query(
+      `SELECT exam_type, exam_date, analysis, values
+       FROM health_exams WHERE user_id = $1
+       ORDER BY created_at DESC LIMIT 4`,
+      [user_id]
+    ),
+    pool.query(
+      `SELECT g.id, g.title, g.target_description, g.deadline,
+              COUNT(t.id)                                              AS total_tasks,
+              COUNT(t.id) FILTER (WHERE t.completed)                  AS done_tasks,
+              COUNT(t.id) FILTER (WHERE t.date < CURRENT_DATE
+                                    AND NOT t.completed)              AS overdue,
+              COUNT(t.id) FILTER (WHERE t.date = CURRENT_DATE)        AS today_total,
+              COUNT(t.id) FILTER (WHERE t.date = CURRENT_DATE
+                                    AND t.completed)                  AS today_done
+       FROM goals g
+       LEFT JOIN goal_tasks t ON t.goal_id = g.id
+       WHERE g.user_id = $1 AND g.status = 'active'
+       GROUP BY g.id`,
       [user_id]
     ),
     pool.query(
       `SELECT message, category, created_at
        FROM proactive_log
        WHERE user_id = $1 AND should_notify = true
-       ORDER BY created_at DESC
-       LIMIT 20`,
+       ORDER BY created_at DESC LIMIT 12`,
       [user_id]
     ),
   ]);
 
-  const memories = memoriesResult.rows;
-  const pastInsights = historyResult.rows;
+  const memories = memoriesRes.rows;
+  const metrics  = metricsRes.rows;
+  const exams    = examsRes.rows;
+  const goals    = goalsRes.rows;
+  const past     = pastInsightsRes.rows;
 
-  if (!memories.length) return { shouldNotify: false, message: null };
+  if (!memories.length && !metrics.length && !goals.length) {
+    return { shouldNotify: false, message: null, reason: "no_data" };
+  }
 
-  const memorySummary = memories
-    .map((m) => {
-      const date = new Date(m.created_at).toLocaleDateString("pt-BR");
-      return `[${date}] ${m.content}`;
-    })
-    .join("\n");
+  // --- Monta blocos de contexto ---
 
-  const pastInsightsSummary = pastInsights.length
-    ? pastInsights
-        .map((p) => {
-          const date = new Date(p.created_at).toLocaleDateString("pt-BR");
-          return `[${date}] (${p.category}) ${p.message}`;
-        })
-        .join("\n")
+  const memoriesBlock = memories.length
+    ? memories.map((m) => `[${new Date(m.created_at).toLocaleDateString("pt-BR")}] ${m.content}`).join("\n")
+    : "Nenhuma memória registrada.";
+
+  const metricsBlock = metrics.length
+    ? metrics.map((m) => `${m.type}: ${m.value} ${m.unit} (${new Date(m.date).toLocaleDateString("pt-BR")})`).join(" | ")
+    : "Nenhuma métrica registrada.";
+
+  const examsBlock = exams.length
+    ? exams.map((e) => {
+        const data = typeof e.values === "string" ? JSON.parse(e.values) : e.values;
+        const alerts   = data?.alerts?.length   ? "Alertas: " + data.alerts.join("; ")   : "";
+        const positive = data?.positive?.length ? "Ok: " + data.positive.slice(0,2).join("; ") : "";
+        const date = e.exam_date ? new Date(e.exam_date).toLocaleDateString("pt-BR") : "?";
+        return `${e.exam_type} (${date}): ${e.analysis}. ${alerts} ${positive}`.trim();
+      }).join("\n")
+    : "Nenhum exame registrado.";
+
+  const goalsBlock = goals.length
+    ? goals.map((g) => {
+        const pct = g.total_tasks > 0 ? Math.round((g.done_tasks / g.total_tasks) * 100) : 0;
+        const deadline = g.deadline ? ` | Prazo: ${new Date(g.deadline).toLocaleDateString("pt-BR")}` : "";
+        return (
+          `Meta: "${g.title}" — ${pct}% concluído (${g.done_tasks}/${g.total_tasks} tarefas)` +
+          ` | Atrasadas: ${g.overdue} | Hoje: ${g.today_done}/${g.today_total}${deadline}`
+        );
+      }).join("\n")
+    : "Nenhuma meta ativa.";
+
+  const pastBlock = past.length
+    ? past.map((p) => `[${new Date(p.created_at).toLocaleDateString("pt-BR")}] (${p.category}) ${p.message}`).join("\n")
     : "Nenhuma mensagem enviada ainda.";
-
-  const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.7,
+    temperature: 0.5,
     messages: [
       {
         role: "system",
-        content: `Você é ORA — assistente pessoal de Edgar Lins. Neste momento, você está operando em modo de vigilância proativa: analisando silenciosamente a vida de Edgar para identificar o que merece atenção agora.
+        content: `Você é ORA — assistente pessoal de Edgar Lins. Agora está operando em modo de vigilância silenciosa: analisando todos os dados disponíveis para encontrar algo que MERECE atenção real.
 
-Data/hora atual: ${now}
+Data/hora: ${nowStr}
 
-Sua missão: acompanhar a jornada de Edgar ao longo do tempo, evoluindo os insights conforme ele cresce. Você age como JARVIS — sempre um passo à frente, nunca repetitivo, nunca alarmista sem motivo.
+MISSÃO: Encontrar UMA conexão significativa entre domínios diferentes — algo que Edgar não pediu mas que faz sentido falar agora. Não motivação genérica. Não repetição. Uma observação específica com números ou datas reais.
 
-REGRA MAIS IMPORTANTE: Você já enviou insights anteriores a Edgar (listados abaixo).
-NUNCA repita. Sempre evolua — se já falou sobre IMC, avance para o plano. Se já cobrou academia, pergunte como foi. Cada insight deve ser um passo à frente do último.
+PADRÕES PARA BUSCAR (escolha o mais relevante):
+- Saúde + hábito: exame alterado + comportamento relacionado nas memórias
+- Meta + progresso: meta com tarefas atrasadas ou ritmo de conclusão abaixo do esperado
+- Meta + saúde: objetivo de saúde vs dados de exame ou métricas que mostram progresso ou regressão
+- Tempo + saúde: exame ou métrica com mais de 90 dias sem atualização
+- Memória + omissão: Edgar mencionou querer fazer X há mais de 2 semanas e não voltou a falar
+- Calendário + meta: tarefa atrasada que deveria ter acontecido ontem ou hoje
 
-Analise com profundidade:
-1. SAÚDE: Peso, altura, IMC, exames. Calcule, compare, identifique riscos reais
-2. HÁBITOS: Objetivos mencionados sem acompanhamento. Cobre com especificidade e sem julgamento
-3. TEMPO: Quanto tempo desde eventos importantes? Exames com mais de 6 meses merecem atenção
-4. EVOLUÇÃO: Compare memórias antigas com recentes. Progresso? Regressão? Estagnação?
-5. GAPS: O que Edgar mencionou querer fazer mas não voltou a falar?
+REGRAS:
+- NUNCA repita uma mensagem já enviada (listadas abaixo)
+- Cada insight deve ser um PASSO À FRENTE do último — se cobrou treino, agora pergunte como foi
+- Máximo 2 frases. Específico: use números, datas, nomes reais
+- Tom: JARVIS. Preciso, levemente irônico, nunca alarmista
+- Chame-o de "sir" ou "Edgar"
+- Se não houver NADA genuinamente relevante, retorne should_notify: false — silêncio é melhor que ruído
 
-Tom: JARVIS falando com Tony Stark. Preciso, direto, levemente irônico quando apropriado. Máximo 2 frases. Chame-o de "sir" ou "Edgar".
-NUNCA use markdown. A mensagem será lida em voz alta.
-
-Responda APENAS com JSON válido:
+Responda APENAS JSON válido:
 {
-  "should_notify": true ou false,
-  "message": "mensagem em português ou null",
-  "category": "health | habits | growth | reminder | null",
-  "reason": "motivo interno"
+  "should_notify": true | false,
+  "message": "mensagem em português | null",
+  "category": "health | goals | habits | reminder | null",
+  "reason": "motivo interno breve"
 }`,
       },
       {
         role: "user",
-        content: `=== MENSAGENS JÁ ENVIADAS AO USUÁRIO (não repetir) ===\n${pastInsightsSummary}\n\n=== MEMÓRIAS DO USUÁRIO ===\n${memorySummary}`,
+        content: `=== INSIGHTS JÁ ENVIADOS (não repetir) ===
+${pastBlock}
+
+=== MEMÓRIAS RECENTES ===
+${memoriesBlock}
+
+=== MÉTRICAS DE SAÚDE ===
+${metricsBlock}
+
+=== EXAMES ===
+${examsBlock}
+
+=== METAS E PROGRESSO ===
+${goalsBlock}`,
       },
     ],
   });
@@ -95,12 +154,12 @@ Responda APENAS com JSON válido:
     const result = JSON.parse(raw);
     return {
       shouldNotify: result.should_notify === true,
-      message: result.message || null,
+      message:  result.message  || null,
       category: result.category || null,
-      reason: result.reason || null,
+      reason:   result.reason   || null,
     };
   } catch {
     console.error("❌ Proactive engine JSON parse error:", raw);
-    return { shouldNotify: false, message: null };
+    return { shouldNotify: false, message: null, reason: "parse_error" };
   }
 }

@@ -9,6 +9,7 @@ import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 import { extractMetricsFromText } from "../utils/healthExtractor.js";
 import { generateEmbedding } from "../utils/math.js";
+import { analyzeAndSuggest } from "../utils/proactiveEngine.js";
 
 async function extractAndSaveFacts(user_id, transcript, answer, date) {
   const completion = await openai.chat.completions.create({
@@ -69,6 +70,33 @@ Exemplos corretos:
   }
 
   if (facts.length) console.log(`🧠 Fatos extraídos [${user_id}]:`, facts);
+}
+
+// Intervalo mínimo entre análises proativas por usuário (2h)
+const proactiveLastRun = new Map();
+
+async function runProactiveCheck(user_id) {
+  const last = proactiveLastRun.get(user_id) ?? 0;
+  if (Date.now() - last < 2 * 60 * 60 * 1000) return;
+  proactiveLastRun.set(user_id, Date.now());
+
+  const { shouldNotify, message, category, reason } = await analyzeAndSuggest(user_id);
+
+  await pool.query(
+    `INSERT INTO proactive_log (user_id, should_notify, message, category, reason)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [user_id, shouldNotify, message, category, reason]
+  );
+
+  if (shouldNotify && message) {
+    console.log(`🧠 Proactive insight [${user_id}]: "${message}"`);
+    // Salva como insight pendente para o mobile buscar
+    await pool.query(
+      `INSERT INTO memories (id, user_id, content, summary, type, metadata, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, 'insight', $4, NOW())`,
+      [user_id, message, message.slice(0, 100), JSON.stringify({ source: "proactive", category })]
+    );
+  }
 }
 
 const router = express.Router();
@@ -167,6 +195,11 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
 
     // Extração de fatos relevantes em background (não bloqueia a resposta)
     extractAndSaveFacts(user_id, transcript, answer, now).catch(() => {});
+
+    // Análise proativa em background — dispara 30s após a conversa
+    setTimeout(() => {
+      runProactiveCheck(user_id).catch(() => {});
+    }, 30_000);
 
     // 5️⃣ Envia resposta em stream de áudio (voz)
     res.setHeader("Content-Type", "audio/mpeg");

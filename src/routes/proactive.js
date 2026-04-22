@@ -52,4 +52,40 @@ router.get("/proactive/check/:user_id", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/v1/proactive/insight/:user_id
+ * Retorna o insight pendente mais recente (se houver) e o marca como entregue.
+ */
+router.get("/proactive/insight/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, content, created_at
+       FROM memories
+       WHERE user_id = $1
+         AND type = 'insight'
+         AND (metadata->>'delivered') IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [user_id]
+    );
+
+    if (!rows.length) return res.json({ insight: null });
+
+    const insight = rows[0];
+
+    // Marca como entregue
+    await pool.query(
+      `UPDATE memories
+       SET metadata = metadata || '{"delivered": true}'
+       WHERE id = $1`,
+      [insight.id]
+    );
+
+    res.json({ insight: insight.content });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

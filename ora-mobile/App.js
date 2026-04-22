@@ -11,6 +11,7 @@ import { useMorningBriefing } from "./src/hooks/useMorningBriefing";
 import { useWakeWord } from "./src/hooks/useWakeWord";
 import { useLocation } from "./src/hooks/useLocation";
 import { JarvisOrb } from "./src/components/JarvisOrb";
+import { useProactiveInsight } from "./src/hooks/useProactiveInsight";
 import { HolographicPanel } from "./src/components/HolographicPanel";
 import { TranscriptBubble } from "./src/components/TranscriptBubble";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -36,6 +37,7 @@ function MainScreen({ user, onOpenSettings, city }) {
   } = useVoiceLoop(user.id, city);
 
   const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
+  const { insight } = useProactiveInsight(user.id);
 
   const [showHealth, setShowHealth] = useState(false);
   const [showGoals, setShowGoals]   = useState(false);
@@ -117,6 +119,8 @@ function MainScreen({ user, onOpenSettings, city }) {
           <Animated.Text style={[styles.answerText, { opacity: answerOpacity }]}>
             {displayText}
           </Animated.Text>
+        ) : insight ? (
+          <Text style={styles.insightText}>{insight}</Text>
         ) : null}
       </View>
 
@@ -248,5 +252,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#7f1d1d",
     textAlign: "center",
+  },
+  insightText: {
+    fontSize: 15,
+    color: "#a07830",
+    textAlign: "center",
+    lineHeight: 23,
+    fontStyle: "italic",
   },
 });
