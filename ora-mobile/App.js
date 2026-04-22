@@ -21,6 +21,7 @@ import { API_BASE_URL } from "./src/config/api";
 
 const STATUS_LABELS = {
   idle: "Segure para falar",
+  listening: "Pode falar...",
   recording: "Ouvindo...",
   thinking: "Pensando...",
   speaking: "ORA falando...",

@@ -8,6 +8,7 @@ import {
 
 const STATUS_COLORS = {
   idle: "#1a1a2e",
+  listening: "#f4a261",
   recording: "#e63946",
   thinking: "#4361ee",
   speaking: "#2ec4b6",
@@ -16,6 +17,7 @@ const STATUS_COLORS = {
 
 const STATUS_PULSE = {
   idle: false,
+  listening: true,
   recording: true,
   thinking: true,
   speaking: true,
@@ -58,7 +60,7 @@ export function OrbButton({ status, onPressIn, onPressOut }) {
   }, [status]);
 
   const color = STATUS_COLORS[status] || STATUS_COLORS.idle;
-  const disabled = status === "thinking" || status === "speaking";
+  const disabled = status === "thinking" || status === "speaking" || status === "listening";
 
   return (
     <View style={styles.wrapper}>
