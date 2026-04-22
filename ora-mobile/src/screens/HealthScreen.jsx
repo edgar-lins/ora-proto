@@ -30,7 +30,7 @@ const STATUS_COLORS = {
   atenção: "#ff9f1c",
 };
 
-export function HealthScreen({ user, onBack }) {
+export function HealthScreen({ user, onBack, overlay = false }) {
   const [metrics, setMetrics] = useState([]);
   const [exams, setExams] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
@@ -108,14 +108,18 @@ export function HealthScreen({ user, onBack }) {
     return <ExamResult exam={selectedExam} onBack={() => setSelectedExam(null)} />;
   }
 
+  const Wrapper = overlay ? View : SafeAreaView;
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backText}>← Voltar</Text>
-        </Pressable>
-        <Text style={styles.title}>Saúde</Text>
-      </View>
+    <Wrapper style={[styles.container, overlay && styles.containerOverlay]}>
+      {!overlay && (
+        <View style={styles.header}>
+          <Pressable onPress={onBack} style={styles.backBtn}>
+            <Text style={styles.backText}>← Voltar</Text>
+          </Pressable>
+          <Text style={styles.title}>Saúde</Text>
+        </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
@@ -186,7 +190,7 @@ export function HealthScreen({ user, onBack }) {
           ))
         )}
       </ScrollView>
-    </SafeAreaView>
+    </Wrapper>
   );
 }
 
@@ -260,6 +264,7 @@ function ExamResult({ exam, onBack }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0d0d1a" },
+  containerOverlay: { backgroundColor: "transparent" },
   header: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 },
   backBtn: { marginBottom: 12 },
   backText: { color: "#4361ee", fontSize: 16 },

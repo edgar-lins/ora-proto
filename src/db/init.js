@@ -109,6 +109,35 @@ async function init() {
       );
     `);
 
+    // Metas do usuário (perder peso, ganhar massa, etc.)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS goals (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        target_description TEXT,
+        deadline DATE,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Tarefas diárias vinculadas a uma meta
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS goal_tasks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        goal_id UUID NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        date DATE NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        completed BOOLEAN DEFAULT false,
+        completed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     console.log('✅ Tables created/updated successfully');
   } catch (err) {
     console.error('❌ Error initializing DB:', err);

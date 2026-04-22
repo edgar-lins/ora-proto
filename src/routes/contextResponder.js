@@ -113,6 +113,66 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_goal_plan",
+      description: "Cria um plano estruturado com tarefas diárias quando o usuário quer atingir uma meta (perder peso, ganhar massa, melhorar saúde, criar rotina de treino/dieta)",
+      parameters: {
+        type: "object",
+        properties: {
+          title:              { type: "string", description: "Título curto da meta. Ex: 'Perder 10kg'" },
+          target_description: { type: "string", description: "Descrição do objetivo final. Ex: 'Chegar a 75kg com saúde até julho'" },
+          deadline:           { type: "string", description: "Data limite no formato YYYY-MM-DD (opcional)" },
+          tasks: {
+            type: "array",
+            description: "Tarefas diárias para os próximos 7 dias",
+            items: {
+              type: "object",
+              properties: {
+                date:        { type: "string", description: "Data no formato YYYY-MM-DD" },
+                type:        { type: "string", enum: ["treino", "dieta", "habito"], description: "Categoria da tarefa" },
+                description: { type: "string", description: "O que fazer — específico, prático, sem jargão" },
+              },
+              required: ["date", "type", "description"],
+            },
+          },
+        },
+        required: ["title", "tasks"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "schedule_goal_in_calendar",
+      description: "Agenda todas as tarefas de uma meta no Google Calendar quando o usuário pede para organizar o plano na agenda. Usa a meta ativa mais recente se goal_id não for fornecido.",
+      parameters: {
+        type: "object",
+        properties: {
+          goal_id:      { type: "string",  description: "ID da meta (opcional — usa a mais recente se omitido)" },
+          workout_time: { type: "string",  description: "Horário para tarefas de treino no formato HH:MM (padrão 07:00)" },
+          diet_time:    { type: "string",  description: "Horário para tarefas de dieta no formato HH:MM (padrão 12:00)" },
+          habit_time:   { type: "string",  description: "Horário para tarefas de hábito no formato HH:MM (padrão 20:00)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "show_screen",
+      description: "Abre uma tela específica no app quando o usuário pede para ver suas metas, saúde, etc. Use sempre que o usuário pedir 'me mostra minhas metas', 'quero ver minha saúde', etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          screen: { type: "string", enum: ["goals", "health"], description: "Qual tela abrir" },
+        },
+        required: ["screen"],
+      },
+    },
+  },
 ];
 
 async function executeTool(name, args, user_id) {
@@ -131,8 +191,62 @@ async function executeTool(name, args, user_id) {
       return { ok: true, saved: args.content };
     }
     case "set_reminder": {
-      // Executado no client via X-ORA-Action — apenas valida e devolve os dados
       return { ok: true, scheduled: true, message: args.message, date: args.date, time: args.time };
+    }
+    case "create_goal_plan": {
+      const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+      const res = await fetch(`${baseUrl}/api/v1/goals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id, ...args }),
+      });
+      const data = await res.json();
+      return res.ok
+        ? { ok: true, goal_id: data.goal_id, title: data.title, tasks_count: args.tasks.length }
+        : { ok: false, error: data.error };
+    }
+    case "schedule_goal_in_calendar": {
+      // Busca a meta — usa goal_id fornecido ou a mais recente ativa
+      const goalQuery = args.goal_id
+        ? `SELECT id, title FROM goals WHERE id = $1 AND status = 'active' LIMIT 1`
+        : `SELECT id, title FROM goals WHERE user_id = $1 AND status = 'active' ORDER BY created_at DESC LIMIT 1`;
+      const goalParams = args.goal_id ? [args.goal_id] : [user_id];
+      const { rows: goalRows } = await pool.query(goalQuery, goalParams);
+      if (!goalRows.length) return { ok: false, error: "Nenhuma meta ativa encontrada" };
+
+      const goal = goalRows[0];
+      const { rows: tasks } = await pool.query(
+        `SELECT * FROM goal_tasks WHERE goal_id = $1 AND date >= CURRENT_DATE ORDER BY date, type`,
+        [goal.id]
+      );
+
+      if (!tasks.length) return { ok: false, error: "Nenhuma tarefa futura para agendar" };
+
+      const timeMap = {
+        treino: args.workout_time ?? "07:00",
+        dieta:  args.diet_time    ?? "12:00",
+        habito: args.habit_time   ?? "20:00",
+      };
+      const durationMap = { treino: 60, dieta: 30, habito: 20 };
+
+      let created = 0, failed = 0;
+      for (const task of tasks) {
+        const date = task.date.toISOString().slice(0, 10);
+        const time = timeMap[task.type] ?? "08:00";
+        const duration = durationMap[task.type] ?? 30;
+        const result = await createCalendarEvent(user_id, {
+          title: `${task.description}`,
+          date,
+          time,
+          duration_minutes: duration,
+        }).catch(() => null);
+        if (result) created++; else failed++;
+      }
+
+      return { ok: true, goal_title: goal.title, created, failed, total: tasks.length };
+    }
+    case "show_screen": {
+      return { ok: true, screen: args.screen };
     }
     default:
       return { ok: false, error: "Ferramenta desconhecida" };
@@ -317,9 +431,14 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
         }));
         toolResults.push({ call, result });
 
-        // Guarda o set_reminder para enviar ao client
         if (call.function.name === "set_reminder" && result.ok) {
           actionResult = { type: "set_reminder", ...result };
+        }
+        if (call.function.name === "show_screen" && result.ok) {
+          actionResult = { type: "show_screen", screen: result.screen };
+        }
+        if (call.function.name === "create_goal_plan" && result.ok) {
+          actionResult = { type: "show_screen", screen: "goals" };
         }
       }
 

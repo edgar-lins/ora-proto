@@ -11,7 +11,14 @@ const CAPTURE_AFTER_MS = 2000;
 const CYCLE_MAX_MS   = 5000;
 const CYCLE_PAUSE_MS = 400;
 
-const WAKE_PATTERNS = [/\bora\b/i, /\bo\.r\.a\b/i, /\bei,?\s*ora\b/i, /\boi,?\s*ora\b/i];
+const WAKE_PATTERNS = [
+  /\bora\b/i,
+  /\bo\.r\.a\b/i,
+  /\bei,?\s*ora\b/i,
+  /\boi,?\s*ora\b/i,
+  // Whisper às vezes transcreve "ORA" como "Agora" no início
+  /^agora[,\s]/i,
+];
 
 function matchesWakeWord(text) {
   return !!text && WAKE_PATTERNS.some((p) => p.test(text));
@@ -58,10 +65,11 @@ export function useWakeWord(onDetected, enabled = true) {
         recording = result.recording;
         recordingRef.current = recording;
       } catch (err) {
-        // Conflito com voice loop — espera e tenta de novo
+        // Conflito com voice loop — reseta o modo de áudio e tenta de novo
         if (!activeRef.current) return;
-        if (err.message?.includes("prepared") || err.message?.includes("Only one")) {
-          setTimeout(runCycle, 1500);
+        if (err.message?.includes("prepared") || err.message?.includes("Only one") || err.message?.includes("not allowed")) {
+          await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
+          if (activeRef.current) setTimeout(runCycle, 2000);
           return;
         }
         throw err;
@@ -133,7 +141,8 @@ export function useWakeWord(onDetected, enabled = true) {
     } catch (err) {
       console.error("Wake word cycle error:", err);
       await stopCurrentRecording();
-      if (activeRef.current) setTimeout(runCycle, 1500);
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
+      if (activeRef.current) setTimeout(runCycle, 2000);
     }
   }, [onDetected, stopCurrentRecording]);
 

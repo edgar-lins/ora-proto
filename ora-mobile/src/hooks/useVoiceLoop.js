@@ -22,12 +22,26 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+async function createRecordingWithRetry(options, maxAttempts = 3) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const { recording } = await Audio.Recording.createAsync(options);
+      return recording;
+    } catch (e) {
+      const isConflict = e.message?.includes("Only one") || e.message?.includes("prepared");
+      if (!isConflict || i === maxAttempts - 1) throw e;
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+}
+
 export function useVoiceLoop(userId, city = null) {
   const [status, setStatus] = useState("idle");
   const [lastAnswer, setLastAnswer] = useState("");
   const [lastTranscript, setLastTranscript] = useState("");
   const [activeContexts, setActiveContexts] = useState({});
   const [errorMsg, setErrorMsg] = useState("");
+  const [pendingScreen, setPendingScreen] = useState(null);
 
   const recordingRef   = useRef(null);
   const soundRef       = useRef(null);
@@ -89,6 +103,9 @@ export function useVoiceLoop(userId, city = null) {
             });
           }
         }
+        if (action.type === "show_screen") {
+          setPendingScreen(action.screen);
+        }
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -142,7 +159,7 @@ export function useVoiceLoop(userId, city = null) {
         playsInSilentModeIOS: true,
       });
 
-      const { recording } = await Audio.Recording.createAsync({
+      const recording = await createRecordingWithRetry({
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
         isMeteringEnabled: true,
       });
@@ -203,7 +220,7 @@ export function useVoiceLoop(userId, city = null) {
       if (listeningRef.current) await cancelListening();
 
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const recording = await createRecordingWithRetry(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recordingRef.current = recording;
       setStatus("recording");
       setErrorMsg("");
@@ -235,5 +252,7 @@ export function useVoiceLoop(userId, city = null) {
     setErrorMsg("");
   }, []);
 
-  return { status, lastAnswer, lastTranscript, activeContexts, errorMsg, startRecording, stopAndSend, cancel };
+  const clearPendingScreen = useCallback(() => setPendingScreen(null), []);
+
+  return { status, lastAnswer, lastTranscript, activeContexts, errorMsg, pendingScreen, clearPendingScreen, startRecording, stopAndSend, cancel };
 }

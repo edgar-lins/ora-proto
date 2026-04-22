@@ -1,12 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
-  StyleSheet,
-  Text,
-  View,
-  StatusBar,
-  ActivityIndicator,
-  Pressable,
-  Animated,
+  StyleSheet, Text, View, StatusBar,
+  ActivityIndicator, Pressable, Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useVoiceLoop } from "./src/hooks/useVoiceLoop";
@@ -15,35 +10,44 @@ import { useReminders } from "./src/hooks/useReminders";
 import { useMorningBriefing } from "./src/hooks/useMorningBriefing";
 import { useWakeWord } from "./src/hooks/useWakeWord";
 import { useLocation } from "./src/hooks/useLocation";
-import { OrbButton } from "./src/components/OrbButton";
-import { ContextChips } from "./src/components/ContextChips";
+import { JarvisOrb } from "./src/components/JarvisOrb";
+import { HolographicPanel } from "./src/components/HolographicPanel";
 import { TranscriptBubble } from "./src/components/TranscriptBubble";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { HealthScreen } from "./src/screens/HealthScreen";
+import { GoalsScreen } from "./src/screens/GoalsScreen";
 import { API_BASE_URL } from "./src/config/api";
 
 const STATUS_LABELS = {
-  idle: 'Diga "ORA" ou segure para falar',
+  idle:      'Diga "ORA" ou segure para falar',
   listening: "Pode falar...",
   recording: "Ouvindo...",
-  thinking: "Pensando...",
-  speaking: "ORA falando...",
-  error: "Algo deu errado",
+  thinking:  "Pensando...",
+  speaking:  "ORA falando...",
+  error:     "Algo deu errado",
 };
 
-const STATUS_LABELS_BRIEFING = {
-  ...STATUS_LABELS,
-  idle: "Briefing matinal...",
-  speaking: "ORA falando...",
-};
+function MainScreen({ user, onOpenSettings, city }) {
+  const {
+    status, lastAnswer, lastTranscript, activeContexts,
+    errorMsg, pendingScreen, clearPendingScreen,
+    startRecording, stopAndSend,
+  } = useVoiceLoop(user.id, city);
 
-function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
-  const { status, lastAnswer, lastTranscript, activeContexts, errorMsg, startRecording, stopAndSend } =
-    useVoiceLoop(user.id, city);
   const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
 
-  // Fade-in do texto de resposta
+  const [showHealth, setShowHealth] = useState(false);
+  const [showGoals, setShowGoals]   = useState(false);
+
+  // Open overlay screens triggered by voice
+  useEffect(() => {
+    if (!pendingScreen) return;
+    if (pendingScreen === "goals")  { setShowGoals(true);  clearPendingScreen(); }
+    if (pendingScreen === "health") { setShowHealth(true); clearPendingScreen(); }
+  }, [pendingScreen]);
+
+  // Answer fade-in
   const answerOpacity = useRef(new Animated.Value(1)).current;
   const prevAnswer = useRef("");
   useEffect(() => {
@@ -54,15 +58,13 @@ function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
     Animated.timing(answerOpacity, { toValue: 1, duration: 400, useNativeDriver: true }).start();
   }, [lastAnswer, briefingText, briefingPlaying]);
 
-  const isBusy = briefingPlaying || status === "recording" || status === "thinking" || status === "speaking" || status === "listening";
+  const isBusy = briefingPlaying || ["recording", "thinking", "speaking", "listening"].includes(status);
 
-  // Wake word: ativo apenas quando idle (não durante conversa ou briefing)
   const { resume: resumeWakeWord } = useWakeWord(
     () => { if (!isBusy) startRecording(); },
     !isBusy
   );
 
-  // Quando a conversa termina, retoma o ciclo de wake word
   useEffect(() => {
     if (status === "idle" && !briefingPlaying) resumeWakeWord();
   }, [status, briefingPlaying]);
@@ -71,39 +73,43 @@ function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
     if (briefingPlaying) return;
     if (status === "idle" || status === "error") startRecording();
   };
-
   const handlePressOut = () => {
     if (status === "recording") stopAndSend();
   };
 
-  const displayText = briefingPlaying ? briefingText : lastAnswer;
+  const displayText   = briefingPlaying ? briefingText : lastAnswer;
   const displayStatus = briefingPlaying
-    ? STATUS_LABELS_BRIEFING[status === "idle" ? "idle" : "speaking"]
+    ? (status === "idle" ? "Briefing matinal..." : "ORA falando...")
     : STATUS_LABELS[status];
+
+  const orbStatus = briefingPlaying ? "speaking" : status;
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-      <View style={styles.header}>
-        <Text style={styles.title}>ORA</Text>
-        <Pressable onPress={onOpenSettings}>
-          <Text style={styles.greeting}>Olá, {user.name} ⚙</Text>
+      {/* Top bar: logo + settings icon */}
+      <View style={styles.topBar}>
+        <Text style={styles.logo}>O R A</Text>
+        <Pressable onPress={onOpenSettings} style={styles.settingsBtn} hitSlop={12}>
+          <Text style={styles.settingsIcon}>⚙</Text>
         </Pressable>
       </View>
 
-      <ContextChips contexts={activeContexts} />
-
+      {/* Center: transcript + orb + status */}
       <View style={styles.center}>
         <TranscriptBubble text={lastTranscript} />
-        <OrbButton
-          status={briefingPlaying ? "speaking" : status}
+
+        <JarvisOrb
+          status={orbStatus}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
         />
+
         <Text style={styles.statusLabel}>{displayStatus}</Text>
       </View>
 
+      {/* Answer text */}
       <View style={styles.answerBox}>
         {errorMsg && !briefingPlaying ? (
           <Text style={styles.errorText}>{errorMsg}</Text>
@@ -114,9 +120,23 @@ function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
         ) : null}
       </View>
 
-      <Pressable onPress={onOpenHealth} style={styles.healthBtn}>
-        <Text style={styles.healthBtnText}>❤️ Saúde</Text>
-      </Pressable>
+      {/* Holographic overlay: Goals */}
+      <HolographicPanel
+        visible={showGoals}
+        onClose={() => setShowGoals(false)}
+        title="METAS"
+      >
+        <GoalsScreen user={user} overlay />
+      </HolographicPanel>
+
+      {/* Holographic overlay: Health */}
+      <HolographicPanel
+        visible={showHealth}
+        onClose={() => setShowHealth(false)}
+        title="SAÚDE"
+      >
+        <HealthScreen user={user} overlay />
+      </HolographicPanel>
     </SafeAreaView>
   );
 }
@@ -124,7 +144,6 @@ function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
 export default function App() {
   const { user, loading, login, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
-  const [showHealth, setShowHealth] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const city = useLocation();
 
@@ -141,7 +160,7 @@ export default function App() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#4361ee" size="large" />
+        <ActivityIndicator color="#f59e0b" size="large" />
       </View>
     );
   }
@@ -158,16 +177,11 @@ export default function App() {
     );
   }
 
-  if (showHealth) {
-    return <HealthScreen user={user} onBack={() => setShowHealth(false)} />;
-  }
-
   return (
     <MainScreen
       user={user}
       city={city}
       onOpenSettings={() => setShowSettings(true)}
-      onOpenHealth={() => setShowHealth(true)}
     />
   );
 }
@@ -175,66 +189,64 @@ export default function App() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: "#0d0d1a",
+    backgroundColor: "#000",
     alignItems: "center",
     justifyContent: "center",
   },
   container: {
     flex: 1,
-    backgroundColor: "#0d0d1a",
+    backgroundColor: "#000",
   },
-  header: {
-    paddingTop: 16,
-    paddingHorizontal: 24,
+  topBar: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 12,
+    paddingHorizontal: 24,
+    position: "relative",
   },
-  title: {
-    fontSize: 36,
-    fontWeight: "700",
-    color: "#ffffff",
+  logo: {
+    fontSize: 13,
+    fontWeight: "300",
+    color: "#3a3a4a",
     letterSpacing: 8,
   },
-  greeting: {
-    fontSize: 13,
-    color: "#555",
-    marginTop: 4,
-    letterSpacing: 1,
+  settingsBtn: {
+    position: "absolute",
+    right: 24,
+  },
+  settingsIcon: {
+    fontSize: 16,
+    color: "#2a2a3a",
   },
   center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 32,
+    gap: 28,
   },
   statusLabel: {
-    fontSize: 16,
-    color: "#aaa",
-    letterSpacing: 1,
+    fontSize: 13,
+    color: "#2e2e40",
+    letterSpacing: 0.5,
   },
   answerBox: {
-    minHeight: 100,
-    paddingHorizontal: 32,
-    paddingBottom: 16,
+    minHeight: 90,
+    paddingHorizontal: 36,
+    paddingBottom: 48,
     alignItems: "center",
     justifyContent: "center",
   },
   answerText: {
-    fontSize: 17,
-    color: "#e0e0e0",
+    fontSize: 16,
+    color: "#c8a060",
     textAlign: "center",
-    lineHeight: 26,
+    lineHeight: 24,
+    letterSpacing: 0.2,
   },
   errorText: {
-    fontSize: 15,
-    color: "#e63946",
-    textAlign: "center",
-  },
-  healthBtn: {
-    alignItems: "center",
-    paddingBottom: 32,
-  },
-  healthBtnText: {
-    color: "#444",
     fontSize: 14,
+    color: "#7f1d1d",
+    textAlign: "center",
   },
 });
