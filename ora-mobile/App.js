@@ -12,6 +12,7 @@ import { useVoiceLoop } from "./src/hooks/useVoiceLoop";
 import { useAuth } from "./src/hooks/useAuth";
 import { useReminders } from "./src/hooks/useReminders";
 import { useProactiveCheck } from "./src/hooks/useProactiveCheck";
+import { useMorningBriefing } from "./src/hooks/useMorningBriefing";
 import { OrbButton } from "./src/components/OrbButton";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
@@ -26,17 +27,32 @@ const STATUS_LABELS = {
   error: "Algo deu errado",
 };
 
+const STATUS_LABELS_BRIEFING = {
+  ...STATUS_LABELS,
+  idle: "Briefing matinal...",
+  speaking: "ORA falando...",
+};
+
 function MainScreen({ user, onOpenSettings, onOpenHealth }) {
   const { status, lastAnswer, errorMsg, startRecording, stopAndSend } =
     useVoiceLoop(user.id);
+  const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
+
+  const isBusy = briefingPlaying || status === "recording" || status === "thinking" || status === "speaking";
 
   const handlePressIn = () => {
+    if (briefingPlaying) return;
     if (status === "idle" || status === "error") startRecording();
   };
 
   const handlePressOut = () => {
     if (status === "recording") stopAndSend();
   };
+
+  const displayText = briefingPlaying ? briefingText : lastAnswer;
+  const displayStatus = briefingPlaying
+    ? STATUS_LABELS_BRIEFING[status === "idle" ? "idle" : "speaking"]
+    : STATUS_LABELS[status];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -51,18 +67,18 @@ function MainScreen({ user, onOpenSettings, onOpenHealth }) {
 
       <View style={styles.center}>
         <OrbButton
-          status={status}
+          status={briefingPlaying ? "speaking" : status}
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
         />
-        <Text style={styles.statusLabel}>{STATUS_LABELS[status]}</Text>
+        <Text style={styles.statusLabel}>{displayStatus}</Text>
       </View>
 
       <View style={styles.answerBox}>
-        {errorMsg ? (
+        {errorMsg && !briefingPlaying ? (
           <Text style={styles.errorText}>{errorMsg}</Text>
-        ) : lastAnswer ? (
-          <Text style={styles.answerText}>{lastAnswer}</Text>
+        ) : displayText ? (
+          <Text style={styles.answerText}>{displayText}</Text>
         ) : null}
       </View>
 
