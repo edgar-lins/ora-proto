@@ -39,8 +39,18 @@ async function getHealthSummary(user_id) {
         ? new Date(e.exam_date).toLocaleDateString("pt-BR")
         : "data não informada";
       const data = typeof e.values === "string" ? JSON.parse(e.values) : e.values;
+
+      const valueLines = data?.values?.length
+        ? " Valores: " + data.values.map((v) => {
+            const ref = (v.reference_min != null && v.reference_max != null)
+              ? ` (ref: ${v.reference_min}–${v.reference_max})`
+              : "";
+            return `${v.name}: ${v.value} ${v.unit ?? ""}${ref} [${v.status ?? ""}]`;
+          }).join(", ")
+        : "";
+
       const alerts = data?.alerts?.length ? ` Alertas: ${data.alerts.join("; ")}` : "";
-      return `${e.exam_type} (${date}): ${e.analysis}.${alerts}`;
+      return `${e.exam_type} (${date}): ${e.analysis}.${valueLines}${alerts}`;
     });
     parts.push(`Exames recentes: ${exams.join(" | ")}`);
   }
