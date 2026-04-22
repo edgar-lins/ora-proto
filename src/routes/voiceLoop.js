@@ -8,7 +8,7 @@ import { openai } from "../utils/openaiClient.js";
 import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 import { extractMetricsFromText } from "../utils/healthExtractor.js";
-import { generateEmbedding } from "../utils/math.js";
+import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
 import { analyzeAndSuggest } from "../utils/proactiveEngine.js";
 
 async function extractAndSaveFacts(user_id, transcript, answer, date) {
@@ -52,24 +52,50 @@ Exemplos corretos:
 
   if (!Array.isArray(facts) || facts.length === 0) return;
 
+  // Carrega embeddings de fatos existentes para deduplicação
+  const { rows: existingFacts } = await pool.query(
+    `SELECT id, content, embedding FROM memories
+     WHERE user_id = $1 AND type = 'fact' AND embedding IS NOT NULL`,
+    [user_id]
+  );
+
+  const parsed = existingFacts.map((m) => {
+    try { return { id: m.id, emb: JSON.parse(m.embedding) }; } catch { return null; }
+  }).filter(Boolean);
+
+  let inserted = 0, updated = 0;
+
   for (const fact of facts) {
     if (typeof fact !== "string" || fact.length < 10) continue;
     const embedding = await generateEmbedding(fact);
-    await pool.query(
-      `INSERT INTO memories (id, user_id, content, summary, type, metadata, embedding, created_at)
-       VALUES ($1, $2, $3, $4, 'fact', $5, $6, NOW())`,
-      [
-        uuidv4(),
-        user_id,
-        fact,
-        fact.slice(0, 100),
-        JSON.stringify({ source: "fact-extraction" }),
-        JSON.stringify(embedding),
-      ]
-    );
+
+    // Verifica se já existe fato muito similar (threshold 0.82)
+    const duplicate = parsed.find((m) => cosineSimilarity(embedding, m.emb) > 0.82);
+
+    if (duplicate) {
+      // Atualiza o existente com o conteúdo mais recente
+      await pool.query(
+        `UPDATE memories SET content = $1, summary = $2, embedding = $3, created_at = NOW()
+         WHERE id = $4`,
+        [fact, fact.slice(0, 100), JSON.stringify(embedding), duplicate.id]
+      );
+      // Atualiza cache local para próximos fatos do mesmo batch
+      duplicate.emb = embedding;
+      updated++;
+    } else {
+      await pool.query(
+        `INSERT INTO memories (id, user_id, content, summary, type, metadata, embedding, created_at)
+         VALUES ($1, $2, $3, $4, 'fact', $5, $6, NOW())`,
+        [uuidv4(), user_id, fact, fact.slice(0, 100),
+         JSON.stringify({ source: "fact-extraction" }), JSON.stringify(embedding)]
+      );
+      parsed.push({ id: uuidv4(), emb: embedding });
+      inserted++;
+    }
   }
 
-  if (facts.length) console.log(`🧠 Fatos extraídos [${user_id}]:`, facts);
+  if (inserted + updated > 0)
+    console.log(`🧠 Fatos [${user_id}]: ${inserted} novos, ${updated} atualizados`);
 }
 
 // Intervalo mínimo entre análises proativas por usuário (2h)
@@ -182,6 +208,16 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
         `INSERT INTO memories (id, user_id, content, summary, type, metadata, created_at)
          VALUES ($1, $2, $3, $4, 'auto', $5, NOW())`,
         [uuidv4(), user_id, memoryText, answer.slice(0, 100), JSON.stringify({ source: "voice-loop" })]
+      ).then(() =>
+        // Mantém apenas as últimas 30 memórias 'auto' — o resto é ruído
+        pool.query(
+          `DELETE FROM memories WHERE user_id = $1 AND type = 'auto'
+           AND id NOT IN (
+             SELECT id FROM memories WHERE user_id = $1 AND type = 'auto'
+             ORDER BY created_at DESC LIMIT 30
+           )`,
+          [user_id]
+        )
       ),
       extractMetricsFromText(transcript),
     ]);
@@ -204,6 +240,18 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     setTimeout(() => {
       runProactiveCheck(user_id).catch(() => {});
     }, 30_000);
+
+    // Consolidação automática de memórias — dispara quando fatos > 40
+    pool.query(
+      `SELECT COUNT(*) FROM memories WHERE user_id = $1 AND type = 'fact'`,
+      [user_id]
+    ).then(({ rows }) => {
+      if (parseInt(rows[0].count) > 40) {
+        const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+        fetch(`${baseUrl}/api/v1/memory/consolidate/${encodeURIComponent(user_id)}`, { method: "POST" })
+          .catch(() => {});
+      }
+    }).catch(() => {});
 
     // 5️⃣ Envia resposta em stream de áudio (voz)
     res.setHeader("Content-Type", "audio/mpeg");

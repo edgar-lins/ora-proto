@@ -303,7 +303,7 @@ router.post("/context/respond", async (req, res) => {
       [user_id]
     );
 
-    const scored = memories
+    const allScored = memories
       .filter((m) => m.embedding)
       .map((m) => {
         let emb;
@@ -313,13 +313,22 @@ router.post("/context/respond", async (req, res) => {
           return null;
         }
         if (!Array.isArray(emb)) return null;
-
-        const similarity = cosineSimilarity(queryEmbedding, emb);
-        return { id: m.id, summary: m.summary, content: m.content, similarity };
+        return { id: m.id, summary: m.summary, content: m.content, emb,
+                 similarity: cosineSimilarity(queryEmbedding, emb) };
       })
       .filter(Boolean)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, limit);
+      .sort((a, b) => b.similarity - a.similarity);
+
+    // Seleciona top memórias garantindo diversidade temática
+    // Remove near-duplicates entre os selecionados (threshold 0.88)
+    const scored = [];
+    for (const candidate of allScored) {
+      if (scored.length >= limit) break;
+      const tooSimilarToSelected = scored.some(
+        (s) => cosineSimilarity(candidate.emb, s.emb) > 0.88
+      );
+      if (!tooSimilarToSelected) scored.push(candidate);
+    }
 
     const topSim = scored[0]?.similarity ?? 0;
     const hasContext = topSim >= SIMILARITY_MIN;

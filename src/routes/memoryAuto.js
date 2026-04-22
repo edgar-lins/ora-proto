@@ -97,4 +97,99 @@ router.post("/auto", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/v1/memory/consolidate/:user_id
+ * Agrupa fatos similares e os mescla em memórias consolidadas via GPT.
+ * Reduz ruído e cria memórias mais ricas e estáveis.
+ */
+router.post("/consolidate/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+
+  try {
+    const { rows: facts } = await pool.query(
+      `SELECT id, content, embedding FROM memories
+       WHERE user_id = $1 AND type = 'fact' AND embedding IS NOT NULL
+       ORDER BY created_at DESC`,
+      [user_id]
+    );
+
+    if (facts.length < 4) {
+      return res.json({ status: "ok", message: "Poucos fatos para consolidar", consolidated: 0 });
+    }
+
+    // Importa cosineSimilarity inline
+    const { cosineSimilarity } = await import("../utils/math.js");
+
+    // Monta clusters por similaridade (> 0.78)
+    const parsed = facts.map((f) => {
+      try { return { ...f, emb: JSON.parse(f.embedding) }; } catch { return null; }
+    }).filter(Boolean);
+
+    const visited = new Set();
+    const clusters = [];
+
+    for (let i = 0; i < parsed.length; i++) {
+      if (visited.has(i)) continue;
+      const cluster = [parsed[i]];
+      visited.add(i);
+      for (let j = i + 1; j < parsed.length; j++) {
+        if (visited.has(j)) continue;
+        if (cosineSimilarity(parsed[i].emb, parsed[j].emb) > 0.78) {
+          cluster.push(parsed[j]);
+          visited.add(j);
+        }
+      }
+      if (cluster.length >= 2) clusters.push(cluster);
+    }
+
+    if (!clusters.length) {
+      return res.json({ status: "ok", message: "Nenhum cluster encontrado", consolidated: 0 });
+    }
+
+    let consolidated = 0;
+
+    for (const cluster of clusters) {
+      const factList = cluster.map((f) => `- ${f.content}`).join("\n");
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 120,
+        messages: [
+          {
+            role: "system",
+            content: `Você consolida fatos relacionados sobre uma pessoa em UMA única frase rica e precisa.
+Preserve datas, números e detalhes específicos. Máximo 2 frases. Não invente.`,
+          },
+          { role: "user", content: `Consolide estes fatos:\n${factList}` },
+        ],
+      });
+
+      const merged = completion.choices[0].message.content?.trim();
+      if (!merged) continue;
+
+      const embedding = await generateEmbedding(merged);
+
+      // Apaga fatos originais do cluster e insere o consolidado
+      const ids = cluster.map((f) => f.id);
+      await pool.query(`DELETE FROM memories WHERE id = ANY($1)`, [ids]);
+      await pool.query(
+        `INSERT INTO memories (id, user_id, content, summary, type, metadata, embedding, created_at)
+         VALUES ($1, $2, $3, $4, 'fact', $5, $6, NOW())`,
+        [uuidv4(), user_id, merged, merged.slice(0, 100),
+         JSON.stringify({ source: "consolidation", merged_count: cluster.length }),
+         JSON.stringify(embedding)]
+      );
+
+      consolidated++;
+    }
+
+    console.log(`🗜 Consolidação [${user_id}]: ${consolidated} clusters mesclados`);
+    res.json({ status: "ok", consolidated, clusters_found: clusters.length });
+  } catch (err) {
+    console.error("❌ Consolidation error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
