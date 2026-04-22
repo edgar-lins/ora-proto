@@ -25,6 +25,8 @@ function arrayBufferToBase64(buffer) {
 export function useVoiceLoop(userId, city = null) {
   const [status, setStatus] = useState("idle");
   const [lastAnswer, setLastAnswer] = useState("");
+  const [lastTranscript, setLastTranscript] = useState("");
+  const [activeContexts, setActiveContexts] = useState({});
   const [errorMsg, setErrorMsg] = useState("");
 
   const recordingRef   = useRef(null);
@@ -68,6 +70,12 @@ export function useVoiceLoop(userId, city = null) {
 
       const answerEncoded = response.headers.get("X-ORA-Answer");
       if (answerEncoded) setLastAnswer(decodeURIComponent(answerEncoded));
+
+      const transcriptEncoded = response.headers.get("X-ORA-Transcript");
+      if (transcriptEncoded) setLastTranscript(decodeURIComponent(transcriptEncoded));
+
+      const contextEncoded = response.headers.get("X-ORA-Context");
+      if (contextEncoded) setActiveContexts(JSON.parse(decodeURIComponent(contextEncoded)));
 
       const actionEncoded = response.headers.get("X-ORA-Action");
       if (actionEncoded) {
@@ -227,5 +235,5 @@ export function useVoiceLoop(userId, city = null) {
     setErrorMsg("");
   }, []);
 
-  return { status, lastAnswer, errorMsg, startRecording, stopAndSend, cancel };
+  return { status, lastAnswer, lastTranscript, activeContexts, errorMsg, startRecording, stopAndSend, cancel };
 }

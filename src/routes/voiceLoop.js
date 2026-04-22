@@ -65,6 +65,7 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
 
     const answer = contextJson.answer.trim();
     const actionResult = contextJson.action ?? null;
+    const contexts = contextJson.contexts ?? null;
     console.log(`💬 ORA respondeu: ${answer}`);
 
     // 3️⃣ Gera voz da resposta
@@ -106,9 +107,9 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Content-Disposition", `inline; filename="ora-voice-${Date.now()}.mp3"`);
     res.setHeader("X-ORA-Answer", encodeURIComponent(answer));
-    if (actionResult) {
-      res.setHeader("X-ORA-Action", encodeURIComponent(JSON.stringify(actionResult)));
-    }
+    res.setHeader("X-ORA-Transcript", encodeURIComponent(transcript));
+    if (actionResult) res.setHeader("X-ORA-Action", encodeURIComponent(JSON.stringify(actionResult)));
+    if (contexts)     res.setHeader("X-ORA-Context", encodeURIComponent(JSON.stringify(contexts)));
 
     const stream = fs.createReadStream(tmpAudioPath);
     stream.pipe(res);

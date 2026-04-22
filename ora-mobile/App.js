@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -6,6 +6,7 @@ import {
   StatusBar,
   ActivityIndicator,
   Pressable,
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useVoiceLoop } from "./src/hooks/useVoiceLoop";
@@ -16,6 +17,8 @@ import { useMorningBriefing } from "./src/hooks/useMorningBriefing";
 import { useWakeWord } from "./src/hooks/useWakeWord";
 import { useLocation } from "./src/hooks/useLocation";
 import { OrbButton } from "./src/components/OrbButton";
+import { ContextChips } from "./src/components/ContextChips";
+import { TranscriptBubble } from "./src/components/TranscriptBubble";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { HealthScreen } from "./src/screens/HealthScreen";
@@ -37,9 +40,20 @@ const STATUS_LABELS_BRIEFING = {
 };
 
 function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
-  const { status, lastAnswer, errorMsg, startRecording, stopAndSend } =
+  const { status, lastAnswer, lastTranscript, activeContexts, errorMsg, startRecording, stopAndSend } =
     useVoiceLoop(user.id, city);
   const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
+
+  // Fade-in do texto de resposta
+  const answerOpacity = useRef(new Animated.Value(1)).current;
+  const prevAnswer = useRef("");
+  useEffect(() => {
+    const text = briefingPlaying ? briefingText : lastAnswer;
+    if (!text || text === prevAnswer.current) return;
+    prevAnswer.current = text;
+    answerOpacity.setValue(0);
+    Animated.timing(answerOpacity, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+  }, [lastAnswer, briefingText, briefingPlaying]);
 
   const isBusy = briefingPlaying || status === "recording" || status === "thinking" || status === "speaking" || status === "listening";
 
@@ -79,7 +93,10 @@ function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
         </Pressable>
       </View>
 
+      <ContextChips contexts={activeContexts} />
+
       <View style={styles.center}>
+        <TranscriptBubble text={lastTranscript} />
         <OrbButton
           status={briefingPlaying ? "speaking" : status}
           onPressIn={handlePressIn}
@@ -92,7 +109,9 @@ function MainScreen({ user, onOpenSettings, onOpenHealth, city }) {
         {errorMsg && !briefingPlaying ? (
           <Text style={styles.errorText}>{errorMsg}</Text>
         ) : displayText ? (
-          <Text style={styles.answerText}>{displayText}</Text>
+          <Animated.Text style={[styles.answerText, { opacity: answerOpacity }]}>
+            {displayText}
+          </Animated.Text>
         ) : null}
       </View>
 

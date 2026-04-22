@@ -337,6 +337,13 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
       query,
       answer,
       action: actionResult,
+      contexts: {
+        memory:   hasContext,
+        calendar: calendarBlock !== null,
+        health:   !!healthContext,
+        location: !!city,
+        weather:  !!weatherLine,
+      },
       context_used: contextBlock,
       conversation_used: conversationHistory,
     });
