@@ -24,7 +24,10 @@ router.get("/auth/google", (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/calendar.readonly"],
+    scope: [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+    ],
     state: user_id, // passa o user_id pelo state do OAuth
   });
 
