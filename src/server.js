@@ -20,6 +20,7 @@ import calendarRoutes from "./routes/calendar.js";
 import proactiveRoutes from "./routes/proactive.js";
 import healthRoutes from "./routes/health.js";
 import briefingRoutes from "./routes/briefing.js";
+import transcribeRoutes from "./routes/transcribe.js";
 import dotenv from 'dotenv';
 import cors from "cors";
 
@@ -40,6 +41,7 @@ app.use('/api/v1', calendarRoutes);
 app.use('/api/v1', proactiveRoutes);
 app.use('/api/v1', healthRoutes);
 app.use('/api/v1/device', briefingRoutes);
+app.use('/api/v1/device', transcribeRoutes);
 app.use('/api/v1/device', deviceRoutes);
 app.use("/api/v1/device", searchRoutes);
 app.use("/api/v1/device", respondRoutes);

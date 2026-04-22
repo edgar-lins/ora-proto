@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   StyleSheet,
   Text,
@@ -13,6 +13,7 @@ import { useAuth } from "./src/hooks/useAuth";
 import { useReminders } from "./src/hooks/useReminders";
 import { useProactiveCheck } from "./src/hooks/useProactiveCheck";
 import { useMorningBriefing } from "./src/hooks/useMorningBriefing";
+import { useWakeWord } from "./src/hooks/useWakeWord";
 import { OrbButton } from "./src/components/OrbButton";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
@@ -20,7 +21,7 @@ import { HealthScreen } from "./src/screens/HealthScreen";
 import { API_BASE_URL } from "./src/config/api";
 
 const STATUS_LABELS = {
-  idle: "Segure para falar",
+  idle: 'Diga "ORA" ou segure para falar',
   listening: "Pode falar...",
   recording: "Ouvindo...",
   thinking: "Pensando...",
@@ -39,7 +40,18 @@ function MainScreen({ user, onOpenSettings, onOpenHealth }) {
     useVoiceLoop(user.id);
   const { isPlaying: briefingPlaying, briefingText } = useMorningBriefing(user.id);
 
-  const isBusy = briefingPlaying || status === "recording" || status === "thinking" || status === "speaking";
+  const isBusy = briefingPlaying || status === "recording" || status === "thinking" || status === "speaking" || status === "listening";
+
+  // Wake word: ativo apenas quando idle (não durante conversa ou briefing)
+  const { resume: resumeWakeWord } = useWakeWord(
+    () => { if (!isBusy) startRecording(); },
+    !isBusy
+  );
+
+  // Quando a conversa termina, retoma o ciclo de wake word
+  useEffect(() => {
+    if (status === "idle" && !briefingPlaying) resumeWakeWord();
+  }, [status, briefingPlaying]);
 
   const handlePressIn = () => {
     if (briefingPlaying) return;
