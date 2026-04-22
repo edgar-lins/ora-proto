@@ -8,6 +8,68 @@ import { openai } from "../utils/openaiClient.js";
 import { pool } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 import { extractMetricsFromText } from "../utils/healthExtractor.js";
+import { generateEmbedding } from "../utils/math.js";
+
+async function extractAndSaveFacts(user_id, transcript, answer, date) {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.2,
+    max_tokens: 300,
+    messages: [
+      {
+        role: "system",
+        content: `Você extrai fatos pessoais relevantes de conversas para construir um perfil duradouro do usuário.
+
+Retorne APENAS um array JSON de strings. Cada string é um fato limpo, conciso e datado.
+Extraia apenas informações novas e pessoalmente relevantes:
+- Saúde, sintomas, hábitos, energia, sono
+- Objetivos, planos, intenções declaradas
+- Preferências, rotinas, características pessoais
+- Estado emocional ou situações de vida importantes
+- Trabalho, projetos, conquistas mencionadas
+
+Se não houver nada relevante, retorne [].
+NÃO extraia: perguntas genéricas, respostas factuais sem contexto pessoal, repetições óbvias.
+
+Exemplos corretos:
+["Edgar relatou dificuldade para dormir (${date})", "Edgar quer treinar 3x por semana", "Edgar está estressado com projeto de trabalho (${date})"]`,
+      },
+      {
+        role: "user",
+        content: `Usuário disse: ${transcript}\nORA respondeu: ${answer}`,
+      },
+    ],
+  });
+
+  let facts = [];
+  try {
+    const raw = completion.choices[0].message.content.trim();
+    facts = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  if (!Array.isArray(facts) || facts.length === 0) return;
+
+  for (const fact of facts) {
+    if (typeof fact !== "string" || fact.length < 10) continue;
+    const embedding = await generateEmbedding(fact);
+    await pool.query(
+      `INSERT INTO memories (id, user_id, content, summary, type, metadata, embedding, created_at)
+       VALUES ($1, $2, $3, $4, 'fact', $5, $6, NOW())`,
+      [
+        uuidv4(),
+        user_id,
+        fact,
+        fact.slice(0, 100),
+        JSON.stringify({ source: "fact-extraction" }),
+        JSON.stringify(embedding),
+      ]
+    );
+  }
+
+  if (facts.length) console.log(`🧠 Fatos extraídos [${user_id}]:`, facts);
+}
 
 const router = express.Router();
 const storage = multer.diskStorage({
@@ -79,15 +141,15 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
     const buffer = Buffer.from(await speech.arrayBuffer());
     await fs.promises.writeFile(tmpAudioPath, buffer);
 
-    // 4️⃣ Salva memória automática + detecta métricas de saúde em paralelo
+    // 4️⃣ Salva memória bruta + métricas + extrai fatos limpos (background)
     const memoryText = `Usuário disse: ${transcript}\nORA respondeu: ${answer}`;
-    const id = uuidv4();
+    const now = new Date().toLocaleDateString("pt-BR");
 
     const [, metrics] = await Promise.all([
       pool.query(
         `INSERT INTO memories (id, user_id, content, summary, type, metadata, created_at)
          VALUES ($1, $2, $3, $4, 'auto', $5, NOW())`,
-        [id, user_id, memoryText, answer.slice(0, 100), { source: "voice-loop" }]
+        [uuidv4(), user_id, memoryText, answer.slice(0, 100), JSON.stringify({ source: "voice-loop" })]
       ),
       extractMetricsFromText(transcript),
     ]);
@@ -102,6 +164,9 @@ router.post("/voice/loop", upload.single("audio"), async (req, res) => {
       }
       console.log(`📊 Métricas detectadas [${user_id}]:`, metrics);
     }
+
+    // Extração de fatos relevantes em background (não bloqueia a resposta)
+    extractAndSaveFacts(user_id, transcript, answer, now).catch(() => {});
 
     // 5️⃣ Envia resposta em stream de áudio (voz)
     res.setHeader("Content-Type", "audio/mpeg");
