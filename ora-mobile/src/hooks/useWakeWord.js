@@ -150,6 +150,11 @@ export function useWakeWord(onDetected, enabled = true) {
     if (activeRef.current) setTimeout(runCycle, 600);
   }, [runCycle]);
 
+  const stop = useCallback(async () => {
+    activeRef.current = false;
+    await stopCurrentRecording();
+  }, [stopCurrentRecording]);
+
   useEffect(() => {
     if (!enabled) {
       activeRef.current = false;
@@ -169,5 +174,5 @@ export function useWakeWord(onDetected, enabled = true) {
     };
   }, [enabled, runCycle, stopCurrentRecording]);
 
-  return { resume };
+  return { resume, stop };
 }

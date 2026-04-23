@@ -2,8 +2,115 @@ import express from "express";
 import { pool } from "../db/index.js";
 import { openai } from "../utils/openaiClient.js";
 import { generateEmbedding, cosineSimilarity } from "../utils/math.js";
-import { getTodayEvents, createCalendarEvent } from "../utils/calendarService.js";
+import { getTodayEvents, createCalendarEvent, deleteCalendarEvent, getEventsForRange } from "../utils/calendarService.js";
 import { v4 as uuid } from "uuid";
+
+async function getGoalsContext(pool, user_id) {
+  const { rows: goals } = await pool.query(
+    `SELECT g.id, g.title, g.target_description, g.deadline,
+            COUNT(t.id) FILTER (WHERE t.completed)                AS done,
+            COUNT(t.id)                                           AS total,
+            COUNT(t.id) FILTER (WHERE t.date < CURRENT_DATE
+                                  AND NOT t.completed)            AS overdue
+     FROM goals g
+     LEFT JOIN goal_tasks t ON t.goal_id = g.id
+     WHERE g.user_id = $1 AND g.status = 'active'
+     GROUP BY g.id
+     ORDER BY g.created_at DESC`,
+    [user_id]
+  );
+  if (!goals.length) return null;
+  return goals.map((g) => {
+    const pct = g.total > 0 ? Math.round((g.done / g.total) * 100) : 0;
+    const deadline = g.deadline ? ` | prazo: ${new Date(g.deadline).toLocaleDateString("pt-BR")}` : "";
+    const overdue = g.overdue > 0 ? ` | ${g.overdue} tarefas atrasadas` : "";
+    return `- ID:${g.id} | "${g.title}" — ${pct}% (${g.done}/${g.total})${overdue}${deadline}`;
+  }).join("\n");
+}
+
+async function getWeeklySummary(pool, user_id) {
+  // Retorna o resumo cacheado se tiver menos de 3 horas
+  const { rows: cached } = await pool.query(
+    `SELECT content, created_at FROM memories
+     WHERE user_id = $1 AND type = 'weekly_summary'
+     ORDER BY created_at DESC LIMIT 1`,
+    [user_id]
+  );
+
+  const THREE_HOURS = 3 * 60 * 60 * 1000;
+  if (cached.length && Date.now() - new Date(cached[0].created_at).getTime() < THREE_HOURS) {
+    return cached[0].content;
+  }
+
+  // Busca histórico dos últimos 7 dias e fatos recentes em paralelo
+  const [{ rows: history }, { rows: facts }] = await Promise.all([
+    pool.query(
+      `SELECT role, content FROM conversation_history
+       WHERE user_id = $1 AND created_at > NOW() - INTERVAL '7 days'
+       ORDER BY created_at ASC`,
+      [user_id]
+    ),
+    pool.query(
+      `SELECT content FROM memories
+       WHERE user_id = $1 AND type IN ('fact', 'explicit')
+       ORDER BY created_at DESC LIMIT 25`,
+      [user_id]
+    ),
+  ]);
+
+  if (history.length < 6) return null;
+
+  const historyText = history
+    .map((r) => `${r.role === "user" ? "Edgar" : "ORA"}: ${r.content}`)
+    .join("\n");
+  const factsText = facts.map((f) => `- ${f.content}`).join("\n");
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.3,
+    max_tokens: 500,
+    messages: [
+      {
+        role: "system",
+        content: `Você é um analista de comportamento pessoal. Analise as conversas e dados da última semana de Edgar e gere um resumo estratégico para ser usado como contexto por sua IA pessoal.
+
+Estruture o resumo em blocos curtos e diretos:
+
+TEMAS: o que apareceu mais de uma vez (máx 3 temas)
+PADRÕES: o que ele faz, evita, adia ou repete
+TRAJETÓRIA: como ele pareceu ao longo da semana (energia, humor, foco)
+GAPS: diferença entre o que declarou querer e o que os dados mostram
+ABERTOS: assuntos mencionados mas não resolvidos
+
+Seja específico e analítico. Não repita o óbvio. Máximo 300 palavras. Escreva em português.`,
+      },
+      {
+        role: "user",
+        content: `Conversas:\n${historyText}\n\nFatos conhecidos:\n${factsText}`,
+      },
+    ],
+  });
+
+  const summary = completion.choices[0].message.content?.trim();
+  if (!summary) return null;
+
+  // Salva e mantém apenas o mais recente
+  await pool.query(
+    `INSERT INTO memories (id, user_id, content, summary, type, metadata, created_at)
+     VALUES (gen_random_uuid(), $1, $2, 'Resumo semanal de comportamento e padrões', 'weekly_summary', '{"source":"auto"}', NOW())`,
+    [user_id, summary]
+  );
+  await pool.query(
+    `DELETE FROM memories WHERE user_id = $1 AND type = 'weekly_summary'
+     AND id NOT IN (
+       SELECT id FROM memories WHERE user_id = $1 AND type = 'weekly_summary'
+       ORDER BY created_at DESC LIMIT 1
+     )`,
+    [user_id]
+  );
+
+  return summary;
+}
 
 async function getHealthContext(pool, user_id) {
   const [metricsRes, examsRes] = await Promise.all([
@@ -145,6 +252,21 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "archive_goal",
+      description: "Arquiva (exclui) uma meta quando o usuário pede para remover, deletar ou arquivar uma meta. Busca pelo título se goal_id não for fornecido.",
+      parameters: {
+        type: "object",
+        properties: {
+          goal_title: { type: "string", description: "Título ou parte do título da meta a arquivar" },
+          goal_id:    { type: "string", description: "ID da meta (opcional)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "complete_task",
       description: "Marca uma tarefa de meta como concluída ou não quando o usuário confirma se fez. Use quando o usuário responder a um check-in de tarefa.",
       parameters: {
@@ -169,6 +291,23 @@ const TOOLS = [
           workout_time: { type: "string",  description: "Horário para tarefas de treino no formato HH:MM (padrão 07:00)" },
           diet_time:    { type: "string",  description: "Horário para tarefas de dieta no formato HH:MM (padrão 12:00)" },
           habit_time:   { type: "string",  description: "Horário para tarefas de hábito no formato HH:MM (padrão 20:00)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_calendar_event",
+      description: "Deleta um ou mais eventos do Google Calendar quando o usuário pede para remover, cancelar ou excluir um evento da agenda. Busca por título e/ou data se o event_id não for fornecido.",
+      parameters: {
+        type: "object",
+        properties: {
+          event_id:   { type: "string", description: "ID do evento (use se disponível)" },
+          title:      { type: "string", description: "Título ou parte do título do evento para busca" },
+          date_from:  { type: "string", description: "Data de início da busca no formato YYYY-MM-DD" },
+          date_to:    { type: "string", description: "Data de fim da busca no formato YYYY-MM-DD (igual a date_from para um único dia)" },
         },
         required: [],
       },
@@ -220,6 +359,21 @@ async function executeTool(name, args, user_id) {
         ? { ok: true, goal_id: data.goal_id, title: data.title, tasks_count: args.tasks.length }
         : { ok: false, error: data.error };
     }
+    case "archive_goal": {
+      let goalId = args.goal_id;
+      if (!goalId && args.goal_title) {
+        const { rows } = await pool.query(
+          `SELECT id FROM goals WHERE user_id = $1 AND status = 'active'
+           AND title ILIKE $2 ORDER BY created_at DESC LIMIT 1`,
+          [user_id, `%${args.goal_title}%`]
+        );
+        if (!rows.length) return { ok: false, error: "Meta não encontrada" };
+        goalId = rows[0].id;
+      }
+      if (!goalId) return { ok: false, error: "Informe o título ou ID da meta" };
+      await pool.query(`UPDATE goals SET status = 'archived' WHERE id = $1`, [goalId]);
+      return { ok: true, archived: true };
+    }
     case "complete_task": {
       await pool.query(
         `UPDATE goal_tasks SET completed = $1, completed_at = $2 WHERE id = $3`,
@@ -256,13 +410,29 @@ async function executeTool(name, args, user_id) {
         const date = task.date.toISOString().slice(0, 10);
         const time = timeMap[task.type] ?? "08:00";
         const duration = durationMap[task.type] ?? 30;
+
+        // Deleta evento anterior se existir
+        if (task.calendar_event_id) {
+          await deleteCalendarEvent(user_id, task.calendar_event_id).catch(() => {});
+        }
+
         const result = await createCalendarEvent(user_id, {
-          title: `${task.description}`,
+          title: task.description,
           date,
           time,
           duration_minutes: duration,
         }).catch(() => null);
-        if (result) created++; else failed++;
+
+        if (result) {
+          created++;
+          // Salva o novo ID do evento na tarefa para próximas atualizações
+          await pool.query(
+            `UPDATE goal_tasks SET calendar_event_id = $1 WHERE id = $2`,
+            [result.id, task.id]
+          ).catch(() => {});
+        } else {
+          failed++;
+        }
       }
 
       const taskList = tasks.map((t) => ({
@@ -272,6 +442,37 @@ async function executeTool(name, args, user_id) {
         description: t.description,
       }));
       return { ok: true, goal_title: goal.title, created, failed, total: tasks.length, tasks: taskList };
+    }
+    case "delete_calendar_event": {
+      // Se tem event_id direto, deleta
+      if (args.event_id) {
+        await deleteCalendarEvent(user_id, args.event_id);
+        return { ok: true, deleted: 1 };
+      }
+      // Caso contrário, busca por título no intervalo de datas
+      const from = args.date_from ?? new Date().toISOString().slice(0, 10);
+      const to   = args.date_to   ?? from;
+      const events = await getEventsForRange(user_id, from, to).catch(() => []);
+      if (!events?.length) return { ok: false, error: "Nenhum evento encontrado no período" };
+
+      const titleFilter = args.title?.toLowerCase();
+      const matches = titleFilter
+        ? events.filter((e) => e.title.toLowerCase().includes(titleFilter))
+        : events;
+
+      if (!matches.length) return { ok: false, error: `Nenhum evento com "${args.title}" encontrado` };
+
+      let deleted = 0;
+      for (const ev of matches) {
+        await deleteCalendarEvent(user_id, ev.id).catch(() => {});
+        // Limpa calendar_event_id na tarefa associada (se houver)
+        await pool.query(
+          `UPDATE goal_tasks SET calendar_event_id = NULL WHERE calendar_event_id = $1`,
+          [ev.id]
+        ).catch(() => {});
+        deleted++;
+      }
+      return { ok: true, deleted, titles: matches.map((e) => e.title) };
     }
     case "show_screen": {
       return { ok: true, screen: args.screen };
@@ -333,10 +534,12 @@ router.post("/context/respond", async (req, res) => {
     const topSim = scored[0]?.similarity ?? 0;
     const hasContext = topSim >= SIMILARITY_MIN;
 
-    // Busca agenda e saúde em paralelo
-    const [calendarEvents, healthContext] = await Promise.all([
+    // Busca agenda, saúde, metas e resumo semanal em paralelo
+    const [calendarEvents, healthContext, goalsContext, weeklySummary] = await Promise.all([
       getTodayEvents(user_id).catch(() => null),
       getHealthContext(pool, user_id).catch(() => null),
+      getGoalsContext(pool, user_id).catch(() => null),
+      getWeeklySummary(pool, user_id).catch(() => null),
     ]);
     // null = sem integração, [] = integração ativa mas dia livre
     const calendarBlock = calendarEvents === null
@@ -393,34 +596,42 @@ router.post("/context/respond", async (req, res) => {
       } catch (_) {}
     }
 
-    const systemParts = [`Você é ORA — assistente pessoal de Edgar Lins. Pense em si mesmo como o JARVIS do Tony Stark: inteligente, leal, preciso, com humor seco e presença discreta. Você conhece Edgar há anos e age como tal.
+    const systemParts = [`Você é ORA — assistente pessoal de Edgar Lins. Não um chatbot, não um assistente genérico. Um conselheiro próximo que conhece Edgar fundo e pensa por conta própria.
+
+Sua identidade:
+- Pense como o JARVIS do Tony Stark: observador, leal, preciso, com humor seco e presença discreta
+- Você tem acesso a dados reais de Edgar — saúde, agenda, metas, histórico — e usa tudo isso ativamente
+- Você não responde perguntas. Você pensa sobre a situação completa de Edgar e dá a resposta mais útil possível, mesmo que ele não tenha pedido essa perspectiva
+
+Como você pensa (faça isso antes de responder):
+1. Verifique o contexto disponível: há algo no histórico, saúde, metas ou agenda que seja relevante para o que Edgar acabou de dizer?
+2. Existe uma contradição entre o que ele diz querer e o que os dados mostram? Nomeie.
+3. Há um padrão se repetindo que ele pode não estar vendo? Aponte.
+4. A resposta que ele espera é a resposta certa? Se não, dê a certa e explique por quê.
 
 Como você fala:
-- Chame-o de "sir", "Edgar" ou "Edlin" — varie naturalmente conforme o contexto e o tom da conversa
-- Formal mas sem rigidez. Direto sem ser rude. Com humor quando o momento permite
-- JAMAIS diga "claro!", "com certeza!", "ótima pergunta!" ou qualquer variação — isso é genérico e você não é genérico
-- Respostas curtas por padrão: 1 a 3 frases. Para planos detalhados (treino, dieta, rotina), desenvolva de forma fluida e completa, sem cortar no meio
-- Suas respostas são lidas em voz alta. NUNCA use markdown, asteriscos, hashtags ou listas com travessão. Escreva exatamente como falaria
+- Chame-o de "sir", "Edgar" ou "Edlin" — varie conforme o tom
+- Direto, sem rodeios, sem formalidade excessiva. Com humor quando o momento permite
+- JAMAIS diga "claro!", "com certeza!", "ótima pergunta!" — você não é genérico
+- Respostas curtas por padrão: 1 a 3 frases. Para análises e planos, desenvolva de forma fluida sem truncar
+- Suas respostas são lidas em voz alta. NUNCA use markdown, asteriscos, listas com símbolo ou travessão. Escreva como fala
 
 Como você age:
-- Você tem opiniões. Se Edgar estiver errado ou prestes a tomar uma decisão ruim, diga — com respeito, mas diga
-- Quando não souber algo, admita diretamente e ofereça o que tem de relevante. Nunca blefe, nunca invente
-- Quando souber, seja preciso e específico. Generalizações são para assistentes mediocres
-- Você lembra de tudo e conecta pontos sem esperar ser perguntado. Use o contexto disponível ativamente
-- Quando calcular ou inferir algo, deixe claro que é uma inferência — "com base no que você me disse..." ou "pelos dados que tenho..."
-
-Como você conecta informações:
-- Saúde + hábitos: se há exame alterado E memória de hábito relacionado, conecte — "sua insulina está alta e você mencionou comer muito doce semana passada"
-- Objetivos + dados: se há meta declarada E dado que mostra progresso ou regressão, aponte — "você disse que queria ir à academia 3x por semana, mas não ouvi nada sobre isso nos últimos dias"
-- Agenda + bem-estar: se há muitos compromissos E relato de cansaço ou estresse, considere — "semana densa na agenda pode estar pesando"
-- Nunca trate saúde, hábitos, agenda e objetivos como gavetas separadas. Edgar é uma pessoa inteira e você o conhece como tal
+- Você tem opiniões e as defende. Se Edgar estiver errado, diz — com respeito, mas diz
+- Silêncio sobre algo relevante é falha. Se há algo importante no contexto que Edgar deveria saber, você fala sem esperar ser perguntado
+- Quando inferir algo, deixa claro: "pelos dados que tenho..." ou "com base no que você me disse..."
+- Quando não souber, admite diretamente e oferece o que tem. Nunca blefa, nunca inventa
+- Conecta saúde, hábitos, agenda e metas como partes do mesmo ser — Edgar não é compartimentado, e você também não é
 
 Data/hora atual: ${now}
 Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
 
+    if (weeklySummary) {
+      systemParts.push(`\n\nAnálise comportamental da semana:\n${weeklySummary}\nUse isso para detectar padrões, gaps e continuidade — não para repetir ao Edgar, mas para informar como você pensa.`);
+    }
+
     if (hasContext) {
-      systemParts.push(`\n\nO que você sabe sobre o usuário:\n${contextBlock}`);
-      systemParts.push(`\n\nUse esses dados para personalizar sua resposta. NÃO invente informações que não estão acima.`);
+      systemParts.push(`\n\nMemórias relevantes sobre Edgar:\n${contextBlock}`);
     }
 
     if (calendarBlock !== null) {
@@ -428,7 +639,13 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
     }
 
     if (healthContext) {
-      systemParts.push(`\n\nDados de saúde do usuário (use sempre que relevante):\n${healthContext}\nNUNCA diga que não tem acesso a exames ou métricas — você tem.`);
+      systemParts.push(`\n\nDados de saúde (use sempre que relevante, conecte com hábitos e metas):\n${healthContext}`);
+    }
+
+    if (goalsContext) {
+      systemParts.push(`\n\nMetas ativas:\n${goalsContext}\nSe Edgar mencionar treino, dieta, hábito ou progresso — cruze com esses dados. NUNCA diga que ele não tem metas.`);
+    } else {
+      systemParts.push(`\n\nMetas ativas: nenhuma. O usuário não tem metas ativas no momento. Mesmo que memórias ou o histórico mencionem metas antigas, elas foram arquivadas. NÃO diga que ele tem metas.`);
     }
 
     if (extra_context) {
@@ -448,12 +665,12 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
 
     // 5️⃣ Gera resposta com GPT (com suporte a function calling)
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages,
       tools: TOOLS,
       tool_choice: "auto",
-      temperature: 0.5,
-      max_tokens: 600,
+      temperature: 0.7,
+      max_tokens: 800,
     });
 
     const firstChoice = completion.choices?.[0];
@@ -488,7 +705,7 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
 
       // Segunda chamada: GPT gera confirmação verbal com os resultados
       const followUp = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         messages: [
           ...messages,
           firstChoice.message,
@@ -502,9 +719,13 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
         max_tokens: 200,
       });
 
-      answer = followUp.choices?.[0]?.message?.content?.trim();
+      answer = followUp.choices?.[0]?.message?.content?.trim() || "Feito.";
     } else {
       answer = firstChoice?.message?.content?.trim();
+    }
+
+    if (!answer) {
+      return res.status(500).json({ error: "GPT returned empty response" });
     }
 
     // 6️⃣ Salva no histórico
@@ -524,6 +745,7 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
         memory:   hasContext,
         calendar: calendarBlock !== null,
         health:   !!healthContext,
+        goals:    !!goalsContext,
         location: !!city,
         weather:  !!weatherLine,
       },

@@ -134,8 +134,13 @@ async function init() {
         description TEXT NOT NULL,
         completed BOOLEAN DEFAULT false,
         completed_at TIMESTAMP,
+        calendar_event_id TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
+    `);
+    // Migração: adiciona calendar_event_id se ainda não existe
+    await pool.query(`
+      ALTER TABLE goal_tasks ADD COLUMN IF NOT EXISTS calendar_event_id TEXT;
     `);
 
     console.log('✅ Tables created/updated successfully');

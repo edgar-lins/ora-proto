@@ -53,7 +53,7 @@ async function scheduleTaskNotifications(tasks, goal_title) {
         data: { type: "goal_checkin", task_id: task.id, description: task.description, goal_title },
         sound: true,
       },
-      trigger,
+      trigger: { type: "date", date: trigger },
     }).catch(() => {});
   }
 }
@@ -126,7 +126,7 @@ export function useVoiceLoop(userId, city = null, checkinTask = null) {
           if (triggerDate > new Date()) {
             await Notifications.scheduleNotificationAsync({
               content: { title: "ORA — Lembrete", body: action.message, sound: true },
-              trigger: triggerDate,
+              trigger: { type: "date", date: triggerDate },
             });
           }
         }

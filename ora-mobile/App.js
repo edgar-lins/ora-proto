@@ -74,8 +74,8 @@ function MainScreen({ user, onOpenSettings, city, initialCheckin = null }) {
 
   const isBusy = briefingPlaying || ["recording", "thinking", "speaking", "listening"].includes(status);
 
-  const { resume: resumeWakeWord } = useWakeWord(
-    () => { if (!isBusy) startRecording(); },
+  const { resume: resumeWakeWord, stop: stopWakeWord } = useWakeWord(
+    () => { if (!isBusy) setTimeout(() => startRecording(), 300); },
     !isBusy
   );
 
@@ -83,9 +83,12 @@ function MainScreen({ user, onOpenSettings, city, initialCheckin = null }) {
     if (status === "idle" && !briefingPlaying) resumeWakeWord();
   }, [status, briefingPlaying]);
 
-  const handlePressIn = () => {
+  const handlePressIn = async () => {
     if (briefingPlaying) return;
-    if (status === "idle" || status === "error") startRecording();
+    if (status === "idle" || status === "error") {
+      await stopWakeWord();
+      startRecording();
+    }
   };
   const handlePressOut = () => {
     if (status === "recording") stopAndSend();
