@@ -58,6 +58,37 @@ router.post("/health/sync", async (req, res) => {
 
   if (!user_id) return res.status(400).json({ error: "Missing user_id" });
 
+  // Garante que valores numéricos estejam dentro de um range razoável
+  function clamp(raw, max) {
+    const n = Number(raw);
+    if (isNaN(n) || n <= 0) return null;
+    if (n > max) return null; // valor absurdo — descarta
+    return Math.round(n);
+  }
+
+  // HRV: Shortcuts retorna em unidade interna (~1e14 por ms)
+  function normalizeHrv(raw) {
+    const n = Number(raw);
+    if (isNaN(n) || n <= 0) return null;
+    if (n >= 1 && n <= 300) return Math.round(n);       // já em ms
+    if (n > 1e10) return Math.round(n / 1e14 * 10) / 10; // unidade interna → ms
+    return Math.round(n);
+  }
+
+  // Shortcuts retorna sono em segundos — converte pra minutos
+  // Se o valor for absurdamente grande (nanosegundos), divide mais
+  function toSleepMinutes(raw) {
+    if (!raw) return null;
+    const n = Number(raw);
+    if (isNaN(n) || n <= 0) return null;
+    if (n > 1e12) return Math.round(n / 1e6 / 60);   // microsegundos
+    if (n > 1e9)  return Math.round(n / 1e9 / 60);   // nanosegundos
+    if (n > 86400) return Math.round(n / 60);          // segundos
+    return Math.round(n);                               // já em minutos
+  }
+
+  const sleepMin = toSleepMinutes(sleep_minutes);
+
   try {
     await pool.query(
       `INSERT INTO healthkit_snapshots
@@ -66,11 +97,11 @@ router.post("/health/sync", async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
       [
         user_id,
-        sleep_minutes ?? null,
-        resting_hr ?? null,
-        hrv_ms ?? null,
-        steps_today ?? null,
-        active_calories_today ?? null,
+        sleepMin,
+        resting_hr ? clamp(resting_hr, 1000) : null,
+        hrv_ms     ? normalizeHrv(hrv_ms)   : null,
+        steps_today ? clamp(steps_today, 200000) : null,
+        active_calories_today ? clamp(active_calories_today, 10000) : null,
         weight_kg ?? null,
         recent_workouts ? JSON.stringify(recent_workouts) : null,
       ]
@@ -86,7 +117,7 @@ router.post("/health/sync", async (req, res) => {
       [user_id]
     );
 
-    console.log(`⌚ HealthKit sync [${user_id}]: sono=${sleep_minutes}min, HRV=${hrv_ms}ms, FC=${resting_hr}bpm`);
+    console.log(`⌚ HealthKit sync [${user_id}]: sono=${sleepMin}min, HRV=${normalizeHrv(hrv_ms)}ms, FC=${resting_hr ? Math.round(Number(resting_hr)) : null}bpm`);
     res.json({ status: "ok" });
   } catch (err) {
     console.error("❌ HealthKit sync error:", err.message);
