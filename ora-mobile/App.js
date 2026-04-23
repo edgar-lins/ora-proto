@@ -13,6 +13,7 @@ import { useWakeWord } from "./src/hooks/useWakeWord";
 import { useLocation } from "./src/hooks/useLocation";
 import { JarvisOrb } from "./src/components/JarvisOrb";
 import { useProactiveInsight } from "./src/hooks/useProactiveInsight";
+import { useProactiveActions } from "./src/hooks/useProactiveActions";
 import { HolographicPanel } from "./src/components/HolographicPanel";
 import { TranscriptBubble } from "./src/components/TranscriptBubble";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -171,6 +172,20 @@ function MainScreen({ user, onOpenSettings, city, initialCheckin = null }) {
   );
 }
 
+// Registra categorias de notificação com botões de ação (executa uma vez)
+async function registerNotificationCategories() {
+  await Notifications.setNotificationCategoryAsync("ora_task", [
+    { identifier: "done",     buttonTitle: "Fiz ✓" },
+    { identifier: "skip",     buttonTitle: "Não fiz" },
+    { identifier: "postpone", buttonTitle: "Adiar" },
+  ]);
+  await Notifications.setNotificationCategoryAsync("ora_confirm", [
+    { identifier: "yes", buttonTitle: "Sim" },
+    { identifier: "no",  buttonTitle: "Não" },
+  ]);
+}
+registerNotificationCategories();
+
 export default function App() {
   const { user, loading, login, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
@@ -178,16 +193,37 @@ export default function App() {
   const [checkinTask, setCheckinTask] = useState(null);
   const city = useLocation();
 
-  // Captura toque em notificação de check-in de meta
+  useProactiveActions(user?.id);
+
+  // Captura toques em notificações (check-in de meta + ações proativas)
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+    const sub = Notifications.addNotificationResponseReceivedListener(async (response) => {
       const data = response.notification.request.content.data;
+      const actionId = response.actionIdentifier;
+
       if (data?.type === "goal_checkin") {
         setCheckinTask({ task_id: data.task_id, description: data.description, goal_title: data.goal_title });
       }
+
+      if (data?.type === "proactive_action" && user?.id) {
+        // Botão foi tocado — executa a ação no backend
+        const isDefaultTap = actionId === Notifications.DEFAULT_ACTION_IDENTIFIER;
+        if (isDefaultTap) return; // usuário só abriu a notificação, sem escolher botão
+
+        fetch(`${API_BASE_URL}/api/v1/proactive/execute`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.id,
+            action_type: data.action_type,
+            action_data: data.action_data,
+            response: actionId,
+          }),
+        }).catch(() => {});
+      }
     });
     return () => sub.remove();
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) return;

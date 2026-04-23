@@ -143,6 +143,18 @@ async function init() {
       ALTER TABLE goal_tasks ADD COLUMN IF NOT EXISTS calendar_event_id TEXT;
     `);
 
+    // Log de ações proativas enviadas (evita repetição)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS proactive_action_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        ref_id TEXT,
+        response TEXT,
+        sent_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     console.log('✅ Tables created/updated successfully');
   } catch (err) {
     console.error('❌ Error initializing DB:', err);

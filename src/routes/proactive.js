@@ -1,5 +1,6 @@
 import express from "express";
 import { analyzeAndSuggest } from "../utils/proactiveEngine.js";
+import { detectPendingActions, executeAction } from "../utils/proactiveActions.js";
 import { pool } from "../db/index.js";
 
 const router = express.Router();
@@ -84,6 +85,51 @@ router.get("/proactive/insight/:user_id", async (req, res) => {
 
     res.json({ insight: insight.content });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/v1/proactive/actions/:user_id
+ * Retorna ações pendentes que merecem notificação com botão de resposta.
+ */
+router.get("/proactive/actions/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+  try {
+    const actions = await detectPendingActions(user_id);
+
+    // Registra as ações detectadas no log (sem resposta ainda)
+    for (const action of actions) {
+      await pool.query(
+        `INSERT INTO proactive_action_log (user_id, action_type, ref_id, sent_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT DO NOTHING`,
+        [user_id, action.type, action.ref_id]
+      ).catch(() => {});
+    }
+
+    res.json({ actions });
+  } catch (err) {
+    console.error("❌ Proactive actions error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/v1/proactive/execute
+ * Executa a ação escolhida pelo usuário (botão da notificação).
+ */
+router.post("/proactive/execute", async (req, res) => {
+  const { user_id, action_type, action_data, response } = req.body;
+  if (!user_id || !action_type || !response) {
+    return res.status(400).json({ error: "Missing user_id, action_type or response" });
+  }
+  try {
+    const result = await executeAction(user_id, action_type, action_data, response);
+    console.log(`⚡ Action [${user_id}] ${action_type} → ${response}: ${result.message ?? result.error}`);
+    res.json(result);
+  } catch (err) {
+    console.error("❌ Proactive execute error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
