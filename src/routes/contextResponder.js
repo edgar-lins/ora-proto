@@ -112,6 +112,65 @@ Seja específico e analítico. Não repita o óbvio. Máximo 300 palavras. Escre
   return summary;
 }
 
+async function getWatchContext(pool, user_id) {
+  const { rows } = await pool.query(
+    `SELECT sleep_minutes, resting_hr, hrv_ms, steps_today,
+            active_calories_today, weight_kg, recent_workouts, synced_at
+     FROM healthkit_snapshots
+     WHERE user_id = $1
+     ORDER BY synced_at DESC LIMIT 1`,
+    [user_id]
+  );
+  if (!rows.length) return null;
+
+  const s = rows[0];
+  const parts = [];
+
+  // Sono
+  if (s.sleep_minutes) {
+    const h = Math.floor(s.sleep_minutes / 60);
+    const m = s.sleep_minutes % 60;
+    parts.push(`Sono noite passada: ${h}h${m > 0 ? `${m}min` : ""}`);
+  }
+
+  // FC e HRV — indicadores de recuperação
+  if (s.resting_hr || s.hrv_ms) {
+    const fc  = s.resting_hr ? `FC repouso: ${s.resting_hr}bpm` : "";
+    const hrv = s.hrv_ms     ? `HRV: ${s.hrv_ms}ms` : "";
+    parts.push([fc, hrv].filter(Boolean).join(" | "));
+
+    // Interpretação simples de recuperação
+    if (s.hrv_ms) {
+      const recovery = s.hrv_ms >= 50 ? "recuperação boa" : s.hrv_ms >= 30 ? "recuperação moderada" : "recuperação baixa — corpo sob estresse";
+      parts.push(`Indicador de recuperação: ${recovery}`);
+    }
+  }
+
+  // Atividade de hoje
+  if (s.steps_today || s.active_calories_today) {
+    const steps = s.steps_today           ? `${s.steps_today.toLocaleString("pt-BR")} passos` : "";
+    const kcal  = s.active_calories_today ? `${s.active_calories_today} kcal ativas` : "";
+    parts.push(`Hoje: ${[steps, kcal].filter(Boolean).join(", ")}`);
+  }
+
+  // Peso
+  if (s.weight_kg) parts.push(`Peso mais recente: ${s.weight_kg}kg`);
+
+  // Treinos recentes (últimos 7 dias)
+  const workouts = typeof s.recent_workouts === "string"
+    ? JSON.parse(s.recent_workouts)
+    : s.recent_workouts;
+
+  if (workouts?.length) {
+    const list = workouts.slice(0, 5).map(
+      (w) => `${w.date}: ${w.type} ${w.duration_min}min${w.calories ? ` (${w.calories}kcal)` : ""}`
+    );
+    parts.push(`Treinos recentes:\n${list.map((l) => `  - ${l}`).join("\n")}`);
+  }
+
+  return parts.length ? `Dados do Apple Watch:\n${parts.join("\n")}` : null;
+}
+
 async function getHealthContext(pool, user_id) {
   const [metricsRes, examsRes] = await Promise.all([
     pool.query(
@@ -534,10 +593,11 @@ router.post("/context/respond", async (req, res) => {
     const topSim = scored[0]?.similarity ?? 0;
     const hasContext = topSim >= SIMILARITY_MIN;
 
-    // Busca agenda, saúde, metas e resumo semanal em paralelo
-    const [calendarEvents, healthContext, goalsContext, weeklySummary] = await Promise.all([
+    // Busca todos os contextos em paralelo
+    const [calendarEvents, healthContext, watchContext, goalsContext, weeklySummary] = await Promise.all([
       getTodayEvents(user_id).catch(() => null),
       getHealthContext(pool, user_id).catch(() => null),
+      getWatchContext(pool, user_id).catch(() => null),
       getGoalsContext(pool, user_id).catch(() => null),
       getWeeklySummary(pool, user_id).catch(() => null),
     ]);
@@ -638,8 +698,12 @@ Período do dia: ${timePeriod} — ${timeBehavior}${weatherLine}`];
       systemParts.push(`\n\nVocê TEM acesso à agenda do usuário. ${calendarBlock}\nNUNCA diga que não tem acesso à agenda.`);
     }
 
+    if (watchContext) {
+      systemParts.push(`\n\n${watchContext}\nUse esses dados ativamente — especialmente HRV e sono para avaliar se Edgar está em condição de treinar forte ou precisa de recuperação.`);
+    }
+
     if (healthContext) {
-      systemParts.push(`\n\nDados de saúde (use sempre que relevante, conecte com hábitos e metas):\n${healthContext}`);
+      systemParts.push(`\n\nDados de saúde (exames e métricas, conecte com hábitos e metas):\n${healthContext}`);
     }
 
     if (goalsContext) {

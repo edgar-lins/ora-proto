@@ -14,6 +14,7 @@ import { useLocation } from "./src/hooks/useLocation";
 import { JarvisOrb } from "./src/components/JarvisOrb";
 import { useProactiveInsight } from "./src/hooks/useProactiveInsight";
 import { useProactiveActions } from "./src/hooks/useProactiveActions";
+import { useHealthKit } from "./src/hooks/useHealthKit";
 import { HolographicPanel } from "./src/components/HolographicPanel";
 import { TranscriptBubble } from "./src/components/TranscriptBubble";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -194,6 +195,7 @@ export default function App() {
   const city = useLocation();
 
   useProactiveActions(user?.id);
+  useHealthKit(user?.id);
 
   // Captura toques em notificações (check-in de meta + ações proativas)
   useEffect(() => {

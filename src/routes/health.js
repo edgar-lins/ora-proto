@@ -41,6 +41,60 @@ router.post("/health/metrics", async (req, res) => {
 });
 
 /**
+ * POST /api/v1/health/sync
+ * Recebe snapshot do HealthKit (Apple Watch) e persiste.
+ */
+router.post("/health/sync", async (req, res) => {
+  const {
+    user_id,
+    sleep_minutes,
+    resting_hr,
+    hrv_ms,
+    steps_today,
+    active_calories_today,
+    weight_kg,
+    recent_workouts,
+  } = req.body;
+
+  if (!user_id) return res.status(400).json({ error: "Missing user_id" });
+
+  try {
+    await pool.query(
+      `INSERT INTO healthkit_snapshots
+         (user_id, sleep_minutes, resting_hr, hrv_ms, steps_today,
+          active_calories_today, weight_kg, recent_workouts, synced_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
+      [
+        user_id,
+        sleep_minutes ?? null,
+        resting_hr ?? null,
+        hrv_ms ?? null,
+        steps_today ?? null,
+        active_calories_today ?? null,
+        weight_kg ?? null,
+        recent_workouts ? JSON.stringify(recent_workouts) : null,
+      ]
+    );
+
+    // Mantém apenas os últimos 30 snapshots por usuário
+    await pool.query(
+      `DELETE FROM healthkit_snapshots WHERE user_id = $1
+       AND id NOT IN (
+         SELECT id FROM healthkit_snapshots WHERE user_id = $1
+         ORDER BY synced_at DESC LIMIT 30
+       )`,
+      [user_id]
+    );
+
+    console.log(`⌚ HealthKit sync [${user_id}]: sono=${sleep_minutes}min, HRV=${hrv_ms}ms, FC=${resting_hr}bpm`);
+    res.json({ status: "ok" });
+  } catch (err) {
+    console.error("❌ HealthKit sync error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /api/v1/health/metrics/:user_id
  * Retorna histórico de métricas por tipo
  */

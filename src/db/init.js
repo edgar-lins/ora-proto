@@ -143,6 +143,22 @@ async function init() {
       ALTER TABLE goal_tasks ADD COLUMN IF NOT EXISTS calendar_event_id TEXT;
     `);
 
+    // Snapshots do Apple Watch / HealthKit
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS healthkit_snapshots (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL,
+        sleep_minutes INT,
+        resting_hr INT,
+        hrv_ms INT,
+        steps_today INT,
+        active_calories_today INT,
+        weight_kg NUMERIC(5,1),
+        recent_workouts JSONB,
+        synced_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     // Log de ações proativas enviadas (evita repetição)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS proactive_action_log (

@@ -14,8 +14,15 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.edlin.ora",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "ORA precisa do microfone para ouvir você."
+        "NSMicrophoneUsageDescription": "ORA precisa do microfone para ouvir você.",
+        "NSHealthShareUsageDescription": "ORA lê seus dados de saúde para personalizar recomendações e monitorar seu progresso.",
+        "NSHealthUpdateUsageDescription": "ORA pode registrar métricas de saúde quando você as reportar."
+      },
+      "entitlements": {
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
       }
     },
     "android": {
